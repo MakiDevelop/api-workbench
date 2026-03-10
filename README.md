@@ -52,6 +52,7 @@ Implemented now:
 - Request execution
 - Collection execution via `apiw run --all`
 - Minimal terminal UI via `apiw tui`
+- Desktop GUI shell for macOS and Windows via Tauri
 - Header / query / body templating via `${VAR}`
 - Basic assertions
 - Snapshot writing
@@ -62,7 +63,7 @@ Planned next:
 - Snapshot diff
 - Machine-readable CI output
 - Richer raw-mode TUI
-- Optional Tauri desktop shell
+- Richer desktop flows on top of the Tauri shell
 
 ## Install
 
@@ -134,6 +135,21 @@ The current TUI is intentionally minimal and line-oriented:
 - type `e staging` or `e 2` to switch env
 - type `s` to toggle snapshot writing
 - type `q` to quit
+
+### 6. Open the desktop GUI
+
+```bash
+npm install
+npm run tauri:dev
+```
+
+Build a macOS app bundle locally:
+
+```bash
+npm run tauri:build:mac
+```
+
+Windows bundles are produced on Windows runners through GitHub Actions.
 
 ## Example Output
 
@@ -220,6 +236,7 @@ apiw run requests/create-user.json --env staging --snapshot
 
 - [Onboarding Guide](docs/onboarding.md)
 - [CLI Design](docs/cli.md)
+- [Desktop GUI Guide](docs/desktop.md)
 - [TUI Guide](docs/tui.md)
 - [MVP Plan](docs/mvp.md)
 - [Roadmap](docs/roadmap.md)

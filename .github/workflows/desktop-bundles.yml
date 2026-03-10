@@ -1,0 +1,62 @@
+name: desktop-bundles
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "desktop/**"
+      - "src-tauri/**"
+      - "scripts/prepare-sidecar.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "cmd/apiw-sidecar/**"
+      - "internal/workspace/**"
+      - "internal/envfile/**"
+      - "internal/project/**"
+      - "internal/request/**"
+      - "internal/runner/**"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: api-workbench-macos-bundle
+          - os: windows-latest
+            artifact_name: api-workbench-windows-bundle
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build desktop bundle
+        run: npm run tauri:build
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/release/bundle

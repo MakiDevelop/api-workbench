@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b161d" />
+      <stop offset="100%" stop-color="#17313d" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7cf2cf" />
+      <stop offset="100%" stop-color="#47b8ff" />
+    </linearGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="220" fill="url(#bg)" />
+  <rect x="168" y="220" width="688" height="584" rx="84" fill="#0f222c" stroke="#28404d" stroke-width="20" />
+  <rect x="222" y="284" width="580" height="120" rx="40" fill="#102a35" />
+  <circle cx="278" cy="344" r="22" fill="#7cf2cf" />
+  <circle cx="338" cy="344" r="22" fill="#47b8ff" />
+  <circle cx="398" cy="344" r="22" fill="#ffb76c" />
+  <path d="M278 530h162" stroke="url(#accent)" stroke-width="44" stroke-linecap="round" />
+  <path d="M278 642h468" stroke="#d8eef8" stroke-opacity=".88" stroke-width="34" stroke-linecap="round" />
+  <path d="M530 474l140 112-140 112" fill="none" stroke="#7cf2cf" stroke-width="52" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
