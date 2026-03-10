@@ -27,16 +27,16 @@ Implemented now:
 
 - Project bootstrap
 - Request execution
+- Collection execution via `apiw run --all`
 - Header / query / body templating via `${VAR}`
 - Basic assertions
 - Snapshot writing
 
 Planned next:
 
-- Collection execution
 - OpenAPI / `curl` import
 - Snapshot diff
-- CI-oriented exit summaries
+- Machine-readable CI output
 - Optional TUI / desktop shell
 
 ## Quick Start
@@ -44,6 +44,7 @@ Planned next:
 ```bash
 go run ./cmd/apiw init
 go run ./cmd/apiw run requests/health.json --env local --snapshot
+go run ./cmd/apiw run --all --env local
 ```
 
 Generated structure:
@@ -117,7 +118,8 @@ For plain text:
 ```bash
 apiw init
 apiw run requests/health.json --env local
+apiw run --all --env staging
 apiw run requests/create-user.json --env staging --snapshot
 ```
 
-See [docs/mvp.md](/Users/maki/GitHub/api-workbench/docs/mvp.md) and [docs/cli.md](/Users/maki/GitHub/api-workbench/docs/cli.md) for the current product and command design.
+See [docs/mvp.md](/Users/maki/GitHub/api-workbench/docs/mvp.md), [docs/cli.md](/Users/maki/GitHub/api-workbench/docs/cli.md), and [docs/roadmap.md](/Users/maki/GitHub/api-workbench/docs/roadmap.md) for the current product and strategy direction.

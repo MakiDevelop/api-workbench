@@ -40,4 +40,5 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  apiw init")
 	fmt.Fprintln(w, "  apiw run <request-file> [--env local] [--timeout 15s] [--snapshot]")
+	fmt.Fprintln(w, "  apiw run --all [requests-dir] [--env local] [--timeout 15s] [--snapshot]")
 }

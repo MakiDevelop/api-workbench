@@ -53,6 +53,13 @@ That means the first risk to reduce is execution correctness, not interface poli
 - snapshot diff
 - machine-readable output
 
+Status:
+
+- `collection-level run`: implemented
+- `exit summary for CI`: implemented
+- `snapshot diff`: pending
+- `machine-readable output`: pending
+
 ### M3: Imports
 
 - `curl` import
