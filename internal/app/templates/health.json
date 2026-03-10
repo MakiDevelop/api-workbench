@@ -1,0 +1,14 @@
+{
+  "name": "health-check",
+  "method": "GET",
+  "url": "${BASE_URL}/",
+  "headers": {
+    "Accept": "application/json"
+  },
+  "assertions": [
+    {
+      "type": "status",
+      "equals": 200
+    }
+  ]
+}
