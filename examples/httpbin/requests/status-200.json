@@ -1,0 +1,11 @@
+{
+  "name": "status-200",
+  "method": "GET",
+  "url": "${BASE_URL}/status/200",
+  "assertions": [
+    {
+      "type": "status",
+      "equals": 200
+    }
+  ]
+}

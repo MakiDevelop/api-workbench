@@ -1,0 +1,15 @@
+{
+  "name": "headers-check",
+  "method": "GET",
+  "url": "${BASE_URL}/headers",
+  "assertions": [
+    {
+      "type": "status",
+      "equals": 200
+    },
+    {
+      "type": "body_contains",
+      "contains": "headers"
+    }
+  ]
+}
