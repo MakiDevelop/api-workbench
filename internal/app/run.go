@@ -168,6 +168,10 @@ func runCollection(collectionPath, envName string, timeout time.Duration, snapsh
 		return 1, fmt.Errorf("no request specs found under %s", collectionPath)
 	}
 
+	return runCollectionFiles(files, ctx, snapshot, func(path string) string { return path }, stdout, stderr)
+}
+
+func runCollectionFiles(files []string, ctx runContext, snapshot bool, displayPath func(string) string, stdout, stderr io.Writer) (int, error) {
 	var passed int
 	var failed int
 	var transport int
@@ -178,10 +182,10 @@ func runCollection(collectionPath, envName string, timeout time.Duration, snapsh
 			fmt.Fprintln(stdout, "")
 		}
 
-		fmt.Fprintf(stdout, "file           %s\n", path)
+		fmt.Fprintf(stdout, "file           %s\n", displayPath(path))
 		code, runErr := runRequestFile(path, ctx, snapshot, stdout)
 		if runErr != nil {
-			fmt.Fprintf(stderr, "error          %s: %v\n", path, runErr)
+			fmt.Fprintf(stderr, "error          %s: %v\n", displayPath(path), runErr)
 		}
 
 		switch code {

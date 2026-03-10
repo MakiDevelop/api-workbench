@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-func Run(args []string, stdout, stderr io.Writer) int {
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printUsage(stdout)
 		return 0
@@ -27,6 +27,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "run failed: %v\n", err)
 		}
 		return code
+	case "tui":
+		if err := runTUI(args[1:], stdin, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "tui failed: %v\n", err)
+			return 1
+		}
+		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
@@ -41,4 +47,5 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  apiw init")
 	fmt.Fprintln(w, "  apiw run <request-file> [--env local] [--timeout 15s] [--snapshot]")
 	fmt.Fprintln(w, "  apiw run --all [requests-dir] [--env local] [--timeout 15s] [--snapshot]")
+	fmt.Fprintln(w, "  apiw tui [requests-dir] [--env local] [--timeout 15s] [--snapshot]")
 }

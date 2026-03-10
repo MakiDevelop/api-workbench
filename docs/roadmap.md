@@ -61,7 +61,7 @@ Status: in progress
 
 - GraphQL request support
 - response diff UX
-- lightweight TUI or desktop shell
+- richer raw-mode TUI or desktop shell
 - AI-generated request/collection bootstrap
 
 ## Product Rules

@@ -51,6 +51,7 @@ Implemented now:
 - Project bootstrap
 - Request execution
 - Collection execution via `apiw run --all`
+- Minimal terminal UI via `apiw tui`
 - Header / query / body templating via `${VAR}`
 - Basic assertions
 - Snapshot writing
@@ -60,7 +61,8 @@ Planned next:
 - OpenAPI / `curl` import
 - Snapshot diff
 - Machine-readable CI output
-- Optional TUI / desktop shell
+- Richer raw-mode TUI
+- Optional Tauri desktop shell
 
 ## Install
 
@@ -117,6 +119,21 @@ apiw run requests/health.json --env local --snapshot
 ```bash
 apiw run --all requests --env local
 ```
+
+### 5. Open the terminal UI
+
+```bash
+apiw tui
+```
+
+The current TUI is intentionally minimal and line-oriented:
+
+- type a request number to select it
+- type `r` to run the selected request
+- type `a` to run the whole collection
+- type `e staging` or `e 2` to switch env
+- type `s` to toggle snapshot writing
+- type `q` to quit
 
 ## Example Output
 
@@ -203,6 +220,7 @@ apiw run requests/create-user.json --env staging --snapshot
 
 - [Onboarding Guide](docs/onboarding.md)
 - [CLI Design](docs/cli.md)
+- [TUI Guide](docs/tui.md)
 - [MVP Plan](docs/mvp.md)
 - [Roadmap](docs/roadmap.md)
 - [Growth Strategy](docs/growth.md)

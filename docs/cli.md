@@ -77,3 +77,23 @@ The next likely additions after MVP:
 - `apiw import curl`
 - `apiw import openapi`
 - `apiw snapshot diff`
+
+### `apiw tui [requests-dir]`
+
+Starts the minimal terminal UI for an initialized workspace.
+
+Flags:
+
+- `--env <name>`: initial environment, default `local`
+- `--snapshot`: write snapshots while running from the TUI
+- `--timeout <duration>`: request timeout, default `15s`
+
+Examples:
+
+```bash
+apiw tui
+apiw tui requests/smoke --env staging
+apiw tui requests/admin --env local --snapshot
+```
+
+This first TUI release is line-oriented. It reuses the same execution path as `apiw run` and is meant to validate the interactive workflow before adding a richer raw-mode interface.
