@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/MakiDevelop/api-workbench/internal/app"
 	"github.com/MakiDevelop/api-workbench/internal/workspace"
 )
 
@@ -28,6 +29,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runRequest(args[1:], stdout, stderr)
 	case "run-collection":
 		return runCollection(args[1:], stdout, stderr)
+	case "init-demo":
+		return runInitDemo(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1
@@ -115,6 +118,23 @@ func runCollection(args []string, stdout, stderr *os.File) int {
 	}
 
 	return writeJSON(stdout, result)
+}
+
+func runInitDemo(args []string, stdout, stderr *os.File) int {
+	fs := flag.NewFlagSet("init-demo", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	root := fs.String("root", ".", "workspace root")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if err := app.InitDemo(*root, stdout); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	return 0
 }
 
 func writeJSON(stdout *os.File, value any) int {

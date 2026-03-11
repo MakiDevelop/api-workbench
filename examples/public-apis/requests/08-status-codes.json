@@ -1,0 +1,9 @@
+{
+  "name": "Test 418 Teapot",
+  "method": "GET",
+  "url": "$HTTPBIN/status/418",
+  "assertions": [
+    { "type": "status", "equals": 418 },
+    { "type": "body_contains", "contains": "teapot" }
+  ]
+}

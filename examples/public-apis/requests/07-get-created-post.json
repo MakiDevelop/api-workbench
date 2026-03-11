@@ -1,0 +1,9 @@
+{
+  "name": "Verify Chaining (echo extracted ID)",
+  "method": "GET",
+  "url": "$HTTPBIN/anything/$NEW_POST_ID",
+  "assertions": [
+    { "type": "status", "equals": 200 },
+    { "type": "body_contains", "contains": "101" }
+  ]
+}

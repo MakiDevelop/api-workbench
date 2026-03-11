@@ -1,0 +1,20 @@
+{
+  "name": "Create Post → Extract ID",
+  "method": "POST",
+  "url": "$JSONPLACEHOLDER/posts",
+  "body": {
+    "type": "json",
+    "content": {
+      "title": "API Workbench Test",
+      "body": "Testing request chaining",
+      "userId": 1
+    }
+  },
+  "assertions": [
+    { "type": "status", "equals": 201 },
+    { "type": "json_path", "path": "/title", "expected": "API Workbench Test" }
+  ],
+  "extract": {
+    "NEW_POST_ID": "/id"
+  }
+}

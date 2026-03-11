@@ -1,0 +1,10 @@
+{
+  "name": "Get My IP",
+  "method": "GET",
+  "url": "$HTTPBIN/ip",
+  "assertions": [
+    { "type": "status", "equals": 200 },
+    { "type": "body_contains", "contains": "origin" },
+    { "type": "duration_under", "under": 3000 }
+  ]
+}

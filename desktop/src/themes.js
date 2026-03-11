@@ -106,7 +106,7 @@ const themeVars = {
   },
 };
 
-let currentTheme = localStorage.getItem("apiw.theme") || "dark";
+let currentTheme = localStorage.getItem("apiw.theme") || "light";
 
 export function getTheme() {
   return currentTheme;

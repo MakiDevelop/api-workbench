@@ -44,7 +44,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "apiw - CLI-first API workbench")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  apiw init")
+	fmt.Fprintln(w, "  apiw init [--demo]")
 	fmt.Fprintln(w, "  apiw run <request-file> [--env local] [--timeout 15s] [--snapshot]")
 	fmt.Fprintln(w, "  apiw run --all [requests-dir] [--env local] [--timeout 15s] [--snapshot]")
 	fmt.Fprintln(w, "  apiw tui [requests-dir] [--env local] [--timeout 15s] [--snapshot]")

@@ -86,9 +86,7 @@ func (s Spec) Validate() error {
 				return fmt.Errorf("json_path assertion requires path and expected")
 			}
 		case "json_path_count":
-			if assertion.Path == "" {
-				return fmt.Errorf("json_path_count assertion requires path")
-			}
+			// path can be "" (root array) — only equals is validated at runtime
 		case "duration_under":
 			if assertion.Under <= 0 {
 				return fmt.Errorf("duration_under assertion requires under (ms)")

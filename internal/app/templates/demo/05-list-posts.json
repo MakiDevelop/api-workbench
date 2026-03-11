@@ -1,0 +1,14 @@
+{
+  "name": "List Posts (with query)",
+  "method": "GET",
+  "url": "$JSONPLACEHOLDER/posts",
+  "query": {
+    "userId": "1",
+    "_limit": "5"
+  },
+  "assertions": [
+    { "type": "status", "equals": 200 },
+    { "type": "json_path_count", "path": "", "equals": 5 },
+    { "type": "json_path", "path": "/0/userId", "expected": "1" }
+  ]
+}

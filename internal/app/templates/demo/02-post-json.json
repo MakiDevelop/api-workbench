@@ -1,0 +1,20 @@
+{
+  "name": "POST JSON Echo",
+  "method": "POST",
+  "url": "$HTTPBIN/post",
+  "headers": {
+    "X-Custom-Header": "api-workbench"
+  },
+  "body": {
+    "type": "json",
+    "content": {
+      "username": "maki",
+      "role": "developer"
+    }
+  },
+  "assertions": [
+    { "type": "status", "equals": 200 },
+    { "type": "json_path", "path": "/json/username", "expected": "maki" },
+    { "type": "header_equals", "key": "Content-Type", "value": "application/json" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "POST Form Data",
+  "method": "POST",
+  "url": "$HTTPBIN/post",
+  "body": {
+    "type": "form",
+    "content": {
+      "email": "maki@example.com",
+      "plan": "pro"
+    }
+  },
+  "assertions": [
+    { "type": "status", "equals": 200 },
+    { "type": "json_path", "path": "/form/email", "expected": "maki@example.com" },
+    { "type": "json_path", "path": "/form/plan", "expected": "pro" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Random Dog Image",
+  "method": "GET",
+  "url": "$DOG_API/breeds/image/random",
+  "assertions": [
+    { "type": "status", "equals": 200 },
+    { "type": "json_path", "path": "/status", "expected": "success" },
+    { "type": "body_regex", "pattern": "dog\\.ceo" }
+  ]
+}
