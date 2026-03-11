@@ -17,19 +17,12 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             bundle_path: src-tauri/target/release/bundle/dmg/*.dmg
-            asset_name: API-Workbench-macOS-Apple-Silicon.dmg
-          - os: macos-13
-            target: x86_64-apple-darwin
-            bundle_path: src-tauri/target/release/bundle/dmg/*.dmg
-            asset_name: API-Workbench-macOS-Intel.dmg
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             bundle_path: src-tauri/target/release/bundle/nsis/*.exe
-            asset_name: API-Workbench-Windows-x64-setup.exe
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bundle_path: src-tauri/target/release/bundle/deb/*.deb
-            asset_name: API-Workbench-Linux-x64.deb
 
     runs-on: ${{ matrix.os }}
 
@@ -78,7 +71,7 @@ jobs:
             goos: darwin
             goarch: arm64
             asset_name: apiw-darwin-arm64
-          - os: macos-13
+          - os: macos-latest
             goos: darwin
             goarch: amd64
             asset_name: apiw-darwin-amd64
