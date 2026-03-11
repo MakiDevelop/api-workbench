@@ -1,8 +1,11 @@
 package workspace
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,7 +15,6 @@ import (
 	"github.com/MakiDevelop/api-workbench/internal/project"
 	"github.com/MakiDevelop/api-workbench/internal/request"
 	"github.com/MakiDevelop/api-workbench/internal/runner"
-	"os"
 )
 
 type Info struct {
@@ -23,9 +25,20 @@ type Info struct {
 }
 
 type RequestEntry struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	LoadError string `json:"loadError,omitempty"`
+	Name       string              `json:"name"`
+	Path       string              `json:"path"`
+	Method     string              `json:"method,omitempty"`
+	URL        string              `json:"url,omitempty"`
+	Headers    map[string]string   `json:"headers,omitempty"`
+	Query      map[string]string   `json:"query,omitempty"`
+	Body       *RequestBodyPreview `json:"body,omitempty"`
+	Assertions []request.Assertion `json:"assertions,omitempty"`
+	LoadError  string              `json:"loadError,omitempty"`
+}
+
+type RequestBodyPreview struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
 }
 
 type RequestRun struct {
@@ -92,6 +105,12 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 			entry.LoadError = loadErr.Error()
 		} else {
 			entry.Name = spec.Name
+			entry.Method = strings.ToUpper(spec.Method)
+			entry.URL = spec.URL
+			entry.Headers = spec.Headers
+			entry.Query = spec.Query
+			entry.Assertions = spec.Assertions
+			entry.Body = previewBody(spec.Body)
 		}
 		requests = append(requests, entry)
 	}
@@ -278,6 +297,32 @@ func discoverEnvNames(root string) ([]string, error) {
 
 	sort.Strings(envs)
 	return envs, nil
+}
+
+func previewBody(body *request.Body) *RequestBodyPreview {
+	if body == nil {
+		return nil
+	}
+
+	preview := &RequestBodyPreview{
+		Type:    strings.TrimSpace(body.Type),
+		Content: strings.TrimSpace(string(body.Content)),
+	}
+
+	switch strings.ToLower(preview.Type) {
+	case "", "json":
+		var formatted bytes.Buffer
+		if len(body.Content) > 0 && json.Indent(&formatted, body.Content, "", "  ") == nil {
+			preview.Content = formatted.String()
+		}
+	case "text":
+		var value string
+		if err := json.Unmarshal(body.Content, &value); err == nil {
+			preview.Content = value
+		}
+	}
+
+	return preview
 }
 
 func discoverRequestFiles(collectionPath string) ([]string, error) {
