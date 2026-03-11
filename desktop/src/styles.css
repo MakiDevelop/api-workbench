@@ -26,9 +26,8 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(circle at top right, rgba(255, 108, 55, 0.12), transparent 24%),
-    linear-gradient(180deg, #16110f 0%, #1a1412 100%);
+  background: var(--bg-radial, radial-gradient(circle at top right, rgba(255, 108, 55, 0.12), transparent 24%)),
+    var(--bg-gradient, linear-gradient(180deg, #16110f 0%, #1a1412 100%));
   color: var(--text);
 }
 
@@ -59,9 +58,27 @@ button {
   align-items: center;
   gap: 20px;
   padding: 16px 20px;
-  background: rgba(18, 14, 12, 0.92);
+  background: var(--topbar-bg);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(16px);
+  position: relative;
+  z-index: 1;
+}
+
+.settings-select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.settings-select:focus {
+  border-color: var(--accent);
 }
 
 .brand {
@@ -77,8 +94,8 @@ button {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  background: linear-gradient(135deg, #ff8d59 0%, #ff5b28 100%);
-  color: #1f130f;
+  background: var(--brand-gradient);
+  color: var(--brand-text);
   font-weight: 800;
   letter-spacing: 0.04em;
 }
@@ -153,9 +170,9 @@ button {
 
 .chrome-button--accent,
 .send-button {
-  background: linear-gradient(180deg, #ff7a46 0%, #ff6030 100%);
-  border-color: rgba(255, 108, 55, 0.45);
-  color: #230f07;
+  background: var(--send-gradient);
+  border-color: var(--send-border);
+  color: var(--send-text);
   font-weight: 700;
 }
 
@@ -194,17 +211,23 @@ button:disabled {
 }
 
 .sidebar {
-  background: rgba(19, 15, 13, 0.92);
+  background: var(--sidebar-bg);
   overflow: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .explorer {
-  background: rgba(22, 17, 15, 0.96);
+  background: var(--explorer-bg);
   overflow: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .editor-stack {
-  background: linear-gradient(180deg, rgba(24, 19, 17, 0.98) 0%, rgba(22, 17, 15, 0.98) 100%);
+  background: var(--editor-bg);
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: minmax(0, 1fr) minmax(0, 1.1fr);
   gap: 16px;
@@ -261,7 +284,7 @@ button:disabled {
   padding: 11px 12px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #171210;
+  background: var(--input-bg);
   color: var(--text);
   outline: none;
 }
@@ -460,7 +483,7 @@ button:disabled {
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: #14100e;
+  background: var(--input-bg);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -627,7 +650,7 @@ pre {
   padding: 14px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: #110d0b;
+  background: var(--pre-bg);
   color: var(--text);
   overflow: auto;
   white-space: pre-wrap;
@@ -721,11 +744,13 @@ pre {
   gap: 12px;
   padding: 14px 20px;
   border-top: 1px solid var(--line);
-  background: rgba(17, 13, 11, 0.96);
+  background: var(--statusbar-bg);
+  position: relative;
+  z-index: 1;
 }
 
 .statusbar--error {
-  background: rgba(60, 24, 18, 0.92);
+  background: var(--statusbar-error-bg);
 }
 
 .statusbar p {
@@ -790,4 +815,13 @@ pre {
   .response-metrics {
     flex-wrap: wrap;
   }
+}
+
+/* Matrix theme overrides */
+:root:has(#matrix-rain) .brand__mark {
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.3);
+}
+
+:root:has(#matrix-rain) pre {
+  text-shadow: 0 0 4px rgba(0, 255, 65, 0.4);
 }

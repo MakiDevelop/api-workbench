@@ -2,16 +2,15 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/MakiDevelop/api-workbench/internal/discover"
 	"github.com/MakiDevelop/api-workbench/internal/envfile"
 	"github.com/MakiDevelop/api-workbench/internal/project"
 	"github.com/MakiDevelop/api-workbench/internal/request"
@@ -126,19 +125,24 @@ func prepareRunContext(envName string, timeout time.Duration) (runContext, error
 }
 
 func runRequestFile(reqPath string, ctx runContext, snapshot bool, stdout io.Writer) (int, error) {
+	code, _, err := runRequestFileWithResult(reqPath, ctx, snapshot, stdout)
+	return code, err
+}
+
+func runRequestFileWithResult(reqPath string, ctx runContext, snapshot bool, stdout io.Writer) (int, *runner.Result, error) {
 	spec, err := request.Load(reqPath)
 	if err != nil {
-		return 1, err
+		return 1, nil, err
 	}
 
 	result, runErr := runner.Run(spec, ctx.opts)
 	if runErr != nil {
 		var assertionErr *runner.AssertionError
-		if ok := asAssertionError(runErr, &assertionErr); ok {
+		if errors.As(runErr, &assertionErr) {
 			printResult(stdout, result)
-			return 3, runErr
+			return 3, &result, runErr
 		}
-		return 2, runErr
+		return 2, nil, runErr
 	}
 
 	printResult(stdout, result)
@@ -146,12 +150,12 @@ func runRequestFile(reqPath string, ctx runContext, snapshot bool, stdout io.Wri
 	if snapshot {
 		path, err := runner.WriteSnapshot(ctx.root, ctx.envName, spec, result)
 		if err != nil {
-			return 1, err
+			return 1, &result, err
 		}
 		fmt.Fprintf(stdout, "snapshot       %s\n", path)
 	}
 
-	return 0, nil
+	return 0, &result, nil
 }
 
 func runCollection(collectionPath, envName string, timeout time.Duration, snapshot bool, stdout, stderr io.Writer) (int, error) {
@@ -160,7 +164,7 @@ func runCollection(collectionPath, envName string, timeout time.Duration, snapsh
 		return 1, err
 	}
 
-	files, err := discoverRequestFiles(collectionPath)
+	files, err := discover.RequestFiles(collectionPath)
 	if err != nil {
 		return 1, err
 	}
@@ -177,15 +181,25 @@ func runCollectionFiles(files []string, ctx runContext, snapshot bool, displayPa
 	var transport int
 	var invalid int
 
+	// Shared client for cookie persistence across the collection run.
+	ctx.opts.Client = runner.NewSharedClient(ctx.opts.Timeout)
+
 	for index, path := range files {
 		if index > 0 {
 			fmt.Fprintln(stdout, "")
 		}
 
 		fmt.Fprintf(stdout, "file           %s\n", displayPath(path))
-		code, runErr := runRequestFile(path, ctx, snapshot, stdout)
+		code, result, runErr := runRequestFileWithResult(path, ctx, snapshot, stdout)
 		if runErr != nil {
 			fmt.Fprintf(stderr, "error          %s: %v\n", displayPath(path), runErr)
+		}
+
+		// Merge extracted values into variables for subsequent requests (chaining).
+		if result != nil {
+			for k, v := range result.Extracted {
+				ctx.opts.Variables[k] = v
+			}
 		}
 
 		switch code {
@@ -213,41 +227,6 @@ func runCollectionFiles(files []string, ctx runContext, snapshot bool, displayPa
 	default:
 		return 0, nil
 	}
-}
-
-func discoverRequestFiles(collectionPath string) ([]string, error) {
-	info, err := os.Stat(collectionPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if !info.IsDir() {
-		if filepath.Ext(collectionPath) != ".json" {
-			return nil, fmt.Errorf("%s is not a directory or JSON request file", collectionPath)
-		}
-		return []string{collectionPath}, nil
-	}
-
-	var files []string
-	err = filepath.WalkDir(collectionPath, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".json" {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	sort.Strings(files)
-	return files, nil
 }
 
 func printResult(stdout io.Writer, result runner.Result) {
@@ -288,11 +267,3 @@ func indentBody(body string) string {
 	return strings.Join(lines, "\n")
 }
 
-func asAssertionError(err error, target **runner.AssertionError) bool {
-	value, ok := err.(*runner.AssertionError)
-	if !ok {
-		return false
-	}
-	*target = value
-	return true
-}

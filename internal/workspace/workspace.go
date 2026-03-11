@@ -3,14 +3,13 @@ package workspace
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/MakiDevelop/api-workbench/internal/discover"
 	"github.com/MakiDevelop/api-workbench/internal/envfile"
 	"github.com/MakiDevelop/api-workbench/internal/project"
 	"github.com/MakiDevelop/api-workbench/internal/request"
@@ -83,12 +82,12 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 		collection = "requests"
 	}
 
-	envs, err := discoverEnvNames(root)
+	envs, err := discover.EnvNames(root)
 	if err != nil {
 		return Info{}, err
 	}
 
-	requestFiles, err := discoverRequestFiles(resolvePath(root, collection))
+	requestFiles, err := discover.RequestFiles(resolvePath(root, collection))
 	if err != nil {
 		return Info{}, err
 	}
@@ -96,7 +95,7 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 	requests := make([]RequestEntry, 0, len(requestFiles))
 	for _, path := range requestFiles {
 		entry := RequestEntry{
-			Path: displayRelative(root, path),
+			Path: discover.DisplayRelative(root, path),
 		}
 
 		spec, loadErr := request.Load(path)
@@ -117,7 +116,7 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 
 	return Info{
 		Root:           root,
-		CollectionPath: displayRelative(root, resolvePath(root, collection)),
+		CollectionPath: discover.DisplayRelative(root, resolvePath(root, collection)),
 		Envs:           envs,
 		Requests:       requests,
 	}, nil
@@ -130,7 +129,7 @@ func RunSingle(requestPath string, options RunOptions) (RequestRun, error) {
 	}
 
 	absRequest := resolvePath(ctx.root, requestPath)
-	displayRequest := displayRelative(ctx.root, absRequest)
+	displayRequest := discover.DisplayRelative(ctx.root, absRequest)
 	spec, err := request.Load(absRequest)
 	if err != nil {
 		return RequestRun{
@@ -160,7 +159,7 @@ func RunSingle(requestPath string, options RunOptions) (RequestRun, error) {
 		if snapshotErr != nil {
 			return RequestRun{}, snapshotErr
 		}
-		response.SnapshotPath = displayRelative(ctx.root, snapshotPath)
+		response.SnapshotPath = discover.DisplayRelative(ctx.root, snapshotPath)
 	}
 
 	return response, nil
@@ -176,7 +175,7 @@ func RunAll(collectionPath string, options RunOptions) (CollectionRun, error) {
 		collectionPath = "requests"
 	}
 
-	requestFiles, err := discoverRequestFiles(resolvePath(ctx.root, collectionPath))
+	requestFiles, err := discover.RequestFiles(resolvePath(ctx.root, collectionPath))
 	if err != nil {
 		return CollectionRun{}, err
 	}
@@ -184,20 +183,51 @@ func RunAll(collectionPath string, options RunOptions) (CollectionRun, error) {
 		return CollectionRun{}, fmt.Errorf("no request specs found under %s", collectionPath)
 	}
 
+	// Shared client for cookie persistence across the collection run.
+	sharedClient := runner.NewSharedClient(ctx.runnerOptions.Timeout)
+	ctx.runnerOptions.Client = sharedClient
+
 	response := CollectionRun{
 		Environ: ctx.envName,
 		Runs:    make([]RequestRun, 0, len(requestFiles)),
 	}
 
 	for _, requestFile := range requestFiles {
-		run, runErr := RunSingle(requestFile, RunOptions{
-			Root:     ctx.root,
-			EnvName:  ctx.envName,
-			Timeout:  ctx.runnerOptions.Timeout,
-			Snapshot: options.Snapshot,
-		})
-		if runErr != nil {
-			return CollectionRun{}, runErr
+		absRequest := resolvePath(ctx.root, requestFile)
+		displayRequest := discover.DisplayRelative(ctx.root, absRequest)
+		spec, loadErr := request.Load(absRequest)
+
+		var run RequestRun
+		if loadErr != nil {
+			run = RequestRun{
+				ExitCode:    1,
+				RequestPath: displayRequest,
+				Error:       loadErr.Error(),
+			}
+		} else {
+			result, runErr := runner.Run(spec, ctx.runnerOptions)
+			run = RequestRun{
+				RequestName: spec.Name,
+				RequestPath: displayRequest,
+				Result:      &result,
+			}
+			if runErr != nil {
+				run.ExitCode = classifyRunError(runErr)
+				run.Error = runErr.Error()
+			}
+
+			// Merge extracted values into variables for subsequent requests (chaining).
+			for k, v := range result.Extracted {
+				ctx.runnerOptions.Variables[k] = v
+			}
+
+			if options.Snapshot && run.ExitCode == 0 {
+				snapshotPath, snapshotErr := runner.WriteSnapshot(ctx.root, ctx.envName, spec, result)
+				if snapshotErr != nil {
+					return CollectionRun{}, snapshotErr
+				}
+				run.SnapshotPath = discover.DisplayRelative(ctx.root, snapshotPath)
+			}
 		}
 
 		response.Runs = append(response.Runs, run)
@@ -276,28 +306,6 @@ func findWorkspaceRoot(start string) (string, error) {
 	return project.FindRoot(start)
 }
 
-func discoverEnvNames(root string) ([]string, error) {
-	envDir := filepath.Join(root, ".apiw", "env")
-	entries, err := os.ReadDir(envDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var envs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if filepath.Ext(name) != ".env" {
-			continue
-		}
-		envs = append(envs, strings.TrimSuffix(name, ".env"))
-	}
-
-	sort.Strings(envs)
-	return envs, nil
-}
 
 func previewBody(body *request.Body) *RequestBodyPreview {
 	if body == nil {
@@ -325,41 +333,6 @@ func previewBody(body *request.Body) *RequestBodyPreview {
 	return preview
 }
 
-func discoverRequestFiles(collectionPath string) ([]string, error) {
-	info, err := os.Stat(collectionPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if !info.IsDir() {
-		if filepath.Ext(collectionPath) != ".json" {
-			return nil, fmt.Errorf("%s is not a directory or JSON request file", collectionPath)
-		}
-		return []string{collectionPath}, nil
-	}
-
-	var files []string
-	err = filepath.WalkDir(collectionPath, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".json" {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	sort.Strings(files)
-	return files, nil
-}
-
 func resolvePath(root, value string) string {
 	if filepath.IsAbs(value) {
 		return value
@@ -367,27 +340,10 @@ func resolvePath(root, value string) string {
 	return filepath.Join(root, value)
 }
 
-func displayRelative(root, value string) string {
-	relative, err := filepath.Rel(root, value)
-	if err != nil {
-		return value
-	}
-	return relative
-}
-
 func classifyRunError(err error) int {
 	var assertionErr *runner.AssertionError
-	if ok := asAssertionError(err, &assertionErr); ok {
+	if errors.As(err, &assertionErr) {
 		return 3
 	}
 	return 2
-}
-
-func asAssertionError(err error, target **runner.AssertionError) bool {
-	value, ok := err.(*runner.AssertionError)
-	if !ok {
-		return false
-	}
-	*target = value
-	return true
 }

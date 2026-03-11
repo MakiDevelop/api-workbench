@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 type Options struct {
 	Variables map[string]string
 	Timeout   time.Duration
+	Client    *http.Client // shared client for cookie persistence across collection runs
 }
 
 type Result struct {
@@ -28,6 +31,25 @@ type Result struct {
 	Duration          time.Duration     `json:"-"`
 	DurationMS        int64             `json:"durationMs"`
 	AssertionMessages []string          `json:"assertions"`
+	Extracted         map[string]string `json:"extracted,omitempty"`
+}
+
+// NewSharedClient creates an http.Client with a cookie jar for use across a collection run.
+func NewSharedClient(timeout time.Duration) *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Timeout: timeout,
+		Jar:     jar,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to unsupported scheme: %s", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
 }
 
 type Snapshot struct {
@@ -61,11 +83,17 @@ func Run(spec request.Spec, opts Options) (Result, error) {
 		timeout = 15 * time.Second
 	}
 
-	client := &http.Client{Timeout: timeout}
+	client := opts.Client
+	if client == nil {
+		client = NewSharedClient(timeout)
+	}
 
 	reqURL, err := url.Parse(expanded.URL)
 	if err != nil {
 		return Result{}, err
+	}
+	if reqURL.Scheme != "http" && reqURL.Scheme != "https" {
+		return Result{}, fmt.Errorf("unsupported URL scheme: %s (only http and https are allowed)", reqURL.Scheme)
 	}
 
 	query := reqURL.Query()
@@ -116,6 +144,20 @@ func Run(spec request.Spec, opts Options) (Result, error) {
 
 	messages := evaluateAssertions(expanded.Assertions, result)
 	result.AssertionMessages = messages
+
+	// Extract values from response for chaining
+	if len(spec.Extract) > 0 {
+		extracted := make(map[string]string, len(spec.Extract))
+		for name, pointer := range spec.Extract {
+			val, extractErr := resolveJSONPointer(result.Body, pointer)
+			if extractErr != nil {
+				return result, fmt.Errorf("extract %q (pointer %s): %w", name, pointer, extractErr)
+			}
+			extracted[name] = val
+		}
+		result.Extracted = extracted
+	}
+
 	if len(messages) > 0 {
 		return result, &AssertionError{Messages: messages}
 	}
@@ -156,43 +198,67 @@ func WriteSnapshot(root, envName string, spec request.Spec, result Result) (stri
 
 func expandSpec(spec request.Spec, vars map[string]string) (request.Spec, error) {
 	expanded := spec
-	expanded.URL = expandString(spec.URL, vars)
-	expanded.Headers = expandMap(spec.Headers, vars)
-	expanded.Query = expandMap(spec.Query, vars)
+	var err error
+
+	expanded.URL, err = expandString(spec.URL, vars)
+	if err != nil {
+		return request.Spec{}, fmt.Errorf("url: %w", err)
+	}
+	expanded.Headers, err = expandMap(spec.Headers, vars)
+	if err != nil {
+		return request.Spec{}, fmt.Errorf("headers: %w", err)
+	}
+	expanded.Query, err = expandMap(spec.Query, vars)
+	if err != nil {
+		return request.Spec{}, fmt.Errorf("query: %w", err)
+	}
 
 	if spec.Body != nil {
 		body := *spec.Body
-		body.Type = expandString(body.Type, vars)
-		body.Content = json.RawMessage(expandBytes(body.Content, vars))
+		body.Type, err = expandString(body.Type, vars)
+		if err != nil {
+			return request.Spec{}, fmt.Errorf("body type: %w", err)
+		}
+		bodyStr, err := expandString(string(body.Content), vars)
+		if err != nil {
+			return request.Spec{}, fmt.Errorf("body content: %w", err)
+		}
+		body.Content = json.RawMessage(bodyStr)
 		expanded.Body = &body
 	}
 
 	return expanded, nil
 }
 
-func expandMap(input map[string]string, vars map[string]string) map[string]string {
+func expandMap(input map[string]string, vars map[string]string) (map[string]string, error) {
 	if len(input) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	output := make(map[string]string, len(input))
 	for key, value := range input {
-		output[key] = expandString(value, vars)
+		expanded, err := expandString(value, vars)
+		if err != nil {
+			return nil, fmt.Errorf("key %s: %w", key, err)
+		}
+		output[key] = expanded
 	}
-	return output
+	return output, nil
 }
 
-func expandString(value string, vars map[string]string) string {
-	return os.Expand(value, func(key string) string {
-		if value, ok := vars[key]; ok {
-			return value
+func expandString(value string, vars map[string]string) (string, error) {
+	var missing []string
+	result := os.Expand(value, func(key string) string {
+		if v, ok := vars[key]; ok {
+			return v
 		}
+		missing = append(missing, key)
 		return ""
 	})
-}
-
-func expandBytes(value []byte, vars map[string]string) []byte {
-	return []byte(expandString(string(value), vars))
+	if len(missing) > 0 {
+		return result, fmt.Errorf("undefined variable(s): %s", strings.Join(missing, ", "))
+	}
+	return result, nil
 }
 
 func renderBody(body *request.Body) ([]byte, string, error) {
@@ -210,9 +276,25 @@ func renderBody(body *request.Body) ([]byte, string, error) {
 			return nil, "", fmt.Errorf("text body must be a JSON string")
 		}
 		return []byte(text), "text/plain; charset=utf-8", nil
+	case "form":
+		return renderFormBody(body.Content)
 	default:
 		return nil, "", fmt.Errorf("unsupported body type: %s", body.Type)
 	}
+}
+
+func renderFormBody(content json.RawMessage) ([]byte, string, error) {
+	var fields map[string]string
+	if err := json.Unmarshal(content, &fields); err != nil {
+		return nil, "", fmt.Errorf("form body must be a JSON object with string values: %w", err)
+	}
+
+	form := url.Values{}
+	for key, value := range fields {
+		form.Set(key, value)
+	}
+
+	return []byte(form.Encode()), "application/x-www-form-urlencoded", nil
 }
 
 func normalizeJSON(raw json.RawMessage) ([]byte, string, error) {
@@ -262,11 +344,161 @@ func evaluateAssertions(assertions []request.Assertion, result Result) []string 
 				failures = append(failures, fmt.Sprintf("expected body to contain %q", assertion.Contains))
 			}
 		case "header_equals":
-			if result.Headers[assertion.Key] != assertion.Value {
-				failures = append(failures, fmt.Sprintf("expected header %s=%q, got %q", assertion.Key, assertion.Value, result.Headers[assertion.Key]))
+			got := lookupHeader(result.Headers, assertion.Key)
+			if got != assertion.Value {
+				failures = append(failures, fmt.Sprintf("expected header %s=%q, got %q", assertion.Key, assertion.Value, got))
+			}
+		case "json_path":
+			got, err := resolveJSONPointer(result.Body, assertion.Path)
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("json_path %s: %v", assertion.Path, err))
+			} else if got != assertion.Expected {
+				failures = append(failures, fmt.Sprintf("json_path %s: expected %q, got %q", assertion.Path, assertion.Expected, got))
+			}
+		case "body_regex":
+			matched, err := regexp.MatchString(assertion.Pattern, result.Body)
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("body_regex: invalid pattern %q: %v", assertion.Pattern, err))
+			} else if !matched {
+				failures = append(failures, fmt.Sprintf("body did not match pattern %q", assertion.Pattern))
+			}
+		case "duration_under":
+			if result.DurationMS > int64(assertion.Under) {
+				failures = append(failures, fmt.Sprintf("expected duration under %dms, got %dms", assertion.Under, result.DurationMS))
+			}
+		case "json_path_count":
+			count, err := resolveJSONArrayLength(result.Body, assertion.Path)
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("json_path_count %s: %v", assertion.Path, err))
+			} else if count != assertion.Equals {
+				failures = append(failures, fmt.Sprintf("json_path_count %s: expected %d items, got %d", assertion.Path, assertion.Equals, count))
 			}
 		}
 	}
 
 	return failures
+}
+
+// lookupHeader does a case-insensitive header lookup.
+func lookupHeader(headers map[string]string, key string) string {
+	if v, ok := headers[key]; ok {
+		return v
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}
+
+// resolveJSONPointer evaluates an RFC 6901 JSON Pointer against a JSON body.
+// e.g. "/user/name" on {"user":{"name":"alice"}} returns "alice".
+func resolveJSONPointer(body string, pointer string) (string, error) {
+	var data any
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		return "", fmt.Errorf("body is not valid JSON: %w", err)
+	}
+
+	if pointer == "" || pointer == "/" {
+		return fmt.Sprintf("%v", data), nil
+	}
+
+	if !strings.HasPrefix(pointer, "/") {
+		return "", fmt.Errorf("JSON pointer must start with /")
+	}
+
+	parts := strings.Split(pointer[1:], "/")
+	current := data
+
+	for _, part := range parts {
+		// RFC 6901 unescaping
+		part = strings.ReplaceAll(part, "~1", "/")
+		part = strings.ReplaceAll(part, "~0", "~")
+
+		switch node := current.(type) {
+		case map[string]any:
+			val, ok := node[part]
+			if !ok {
+				return "", fmt.Errorf("key %q not found", part)
+			}
+			current = val
+		case []any:
+			var idx int
+			if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
+				return "", fmt.Errorf("expected array index, got %q", part)
+			}
+			if idx < 0 || idx >= len(node) {
+				return "", fmt.Errorf("array index %d out of range (length %d)", idx, len(node))
+			}
+			current = node[idx]
+		default:
+			return "", fmt.Errorf("cannot traverse into %T at %q", current, part)
+		}
+	}
+
+	switch v := current.(type) {
+	case string:
+		return v, nil
+	case float64:
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v)), nil
+		}
+		return fmt.Sprintf("%g", v), nil
+	case bool:
+		return fmt.Sprintf("%t", v), nil
+	case nil:
+		return "null", nil
+	default:
+		raw, _ := json.Marshal(v)
+		return string(raw), nil
+	}
+}
+
+// resolveJSONArrayLength evaluates a JSON Pointer and returns the length of the array at that path.
+func resolveJSONArrayLength(body string, pointer string) (int, error) {
+	var data any
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		return 0, fmt.Errorf("body is not valid JSON: %w", err)
+	}
+
+	current := data
+
+	if pointer != "" && pointer != "/" {
+		if !strings.HasPrefix(pointer, "/") {
+			return 0, fmt.Errorf("JSON pointer must start with /")
+		}
+
+		parts := strings.Split(pointer[1:], "/")
+		for _, part := range parts {
+			part = strings.ReplaceAll(part, "~1", "/")
+			part = strings.ReplaceAll(part, "~0", "~")
+
+			switch node := current.(type) {
+			case map[string]any:
+				val, ok := node[part]
+				if !ok {
+					return 0, fmt.Errorf("key %q not found", part)
+				}
+				current = val
+			case []any:
+				var idx int
+				if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
+					return 0, fmt.Errorf("expected array index, got %q", part)
+				}
+				if idx < 0 || idx >= len(node) {
+					return 0, fmt.Errorf("array index %d out of range (length %d)", idx, len(node))
+				}
+				current = node[idx]
+			default:
+				return 0, fmt.Errorf("cannot traverse into %T at %q", current, part)
+			}
+		}
+	}
+
+	arr, ok := current.([]any)
+	if !ok {
+		return 0, fmt.Errorf("value at %q is not an array", pointer)
+	}
+	return len(arr), nil
 }

@@ -19,8 +19,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Run vet
+        run: go vet ./...
+
       - name: Run tests
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Build CLI
         run: go build -o bin/apiw ./cmd/apiw
+
+      - name: Build sidecar
+        run: go build -o bin/apiw-sidecar ./cmd/apiw-sidecar

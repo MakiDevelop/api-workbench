@@ -8,11 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/MakiDevelop/api-workbench/internal/discover"
 	"github.com/MakiDevelop/api-workbench/internal/project"
 )
 
@@ -100,7 +100,7 @@ func runTUI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 }
 
 func newTUIState(root, collectionPath, envName string, timeout time.Duration, snapshot bool) (tuiState, error) {
-	envs, err := discoverEnvNames(root)
+	envs, err := discover.EnvNames(root)
 	if err != nil {
 		return tuiState{}, err
 	}
@@ -108,7 +108,7 @@ func newTUIState(root, collectionPath, envName string, timeout time.Duration, sn
 		return tuiState{}, fmt.Errorf("no env files found under %s", filepath.Join(root, ".apiw", "env"))
 	}
 
-	requests, err := discoverRequestFiles(collectionPath)
+	requests, err := discover.RequestFiles(collectionPath)
 	if err != nil {
 		return tuiState{}, err
 	}
@@ -223,11 +223,11 @@ func reloadTUIState(state *tuiState) error {
 	currentEnv := state.currentEnv()
 	currentRequest := state.requests[state.selectedRequest]
 
-	envs, err := discoverEnvNames(state.root)
+	envs, err := discover.EnvNames(state.root)
 	if err != nil {
 		return err
 	}
-	requests, err := discoverRequestFiles(state.collectionPath)
+	requests, err := discover.RequestFiles(state.collectionPath)
 	if err != nil {
 		return err
 	}
@@ -246,29 +246,6 @@ func reloadTUIState(state *tuiState) error {
 	state.selectedRequest = selectRequestIndex(requests, currentRequest)
 	state.status = "reloaded envs and requests"
 	return nil
-}
-
-func discoverEnvNames(root string) ([]string, error) {
-	envDir := filepath.Join(root, ".apiw", "env")
-	entries, err := os.ReadDir(envDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var envs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if filepath.Ext(name) != ".env" {
-			continue
-		}
-		envs = append(envs, strings.TrimSuffix(name, ".env"))
-	}
-
-	sort.Strings(envs)
-	return envs, nil
 }
 
 func splitSinglePathArgs(args []string, valueFlags map[string]bool) (string, []string, error) {
@@ -315,7 +292,7 @@ func renderTUI(stdout io.Writer, state tuiState, clear bool) {
 	fmt.Fprintln(stdout, "apiw tui")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintf(stdout, "project        %s\n", state.root)
-	fmt.Fprintf(stdout, "collection     %s\n", displayRelative(state.root, state.collectionPath))
+	fmt.Fprintf(stdout, "collection     %s\n", discover.DisplayRelative(state.root, state.collectionPath))
 	fmt.Fprintf(stdout, "env            %s\n", state.currentEnv())
 	fmt.Fprintf(stdout, "snapshot       %t\n", state.snapshot)
 	fmt.Fprintf(stdout, "timeout        %s\n", state.timeout)
@@ -356,11 +333,14 @@ func renderTUI(stdout io.Writer, state tuiState, clear bool) {
 }
 
 func (state tuiState) currentEnv() string {
+	if len(state.envs) == 0 || state.selectedEnv >= len(state.envs) {
+		return "local"
+	}
 	return state.envs[state.selectedEnv]
 }
 
 func (state tuiState) displayRequest(path string) string {
-	return displayRelative(state.root, path)
+	return discover.DisplayRelative(state.root, path)
 }
 
 func selectNameOrIndex(values []string, query string) (int, error) {
@@ -430,18 +410,10 @@ func indentBlock(value, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
-func displayRelative(root, path string) string {
-	relative, err := filepath.Rel(root, path)
-	if err != nil {
-		return path
-	}
-	return relative
-}
-
 func tuiDisplayPaths(root string, paths []string) []string {
 	values := make([]string, 0, len(paths))
 	for _, path := range paths {
-		values = append(values, displayRelative(root, path))
+		values = append(values, discover.DisplayRelative(root, path))
 	}
 	return values
 }

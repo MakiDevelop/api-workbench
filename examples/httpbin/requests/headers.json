@@ -10,6 +10,11 @@
     {
       "type": "body_contains",
       "contains": "headers"
+    },
+    {
+      "type": "json_path",
+      "path": "/headers/Host",
+      "expected": "httpbin.org"
     }
   ]
 }

@@ -14,6 +14,7 @@ type Spec struct {
 	Query      map[string]string `json:"query"`
 	Assertions []Assertion       `json:"assertions"`
 	Body       *Body             `json:"body"`
+	Extract    map[string]string `json:"extract,omitempty"` // name → JSON pointer, extracted values become variables for subsequent requests
 }
 
 type Body struct {
@@ -27,6 +28,10 @@ type Assertion struct {
 	Contains string `json:"contains,omitempty"`
 	Key      string `json:"key,omitempty"`
 	Value    string `json:"value,omitempty"`
+	Path     string `json:"path,omitempty"`    // JSON pointer (RFC 6901), e.g. "/user/id"
+	Expected string `json:"expected,omitempty"` // expected string value at path
+	Pattern  string `json:"pattern,omitempty"`  // regex pattern for body_regex
+	Under    int    `json:"under,omitempty"`    // max duration in ms for duration_under
 }
 
 func Load(path string) (Spec, error) {
@@ -68,12 +73,38 @@ func (s Spec) Validate() error {
 			if assertion.Contains == "" {
 				return fmt.Errorf("body_contains assertion requires contains")
 			}
+		case "body_regex":
+			if assertion.Pattern == "" {
+				return fmt.Errorf("body_regex assertion requires pattern")
+			}
 		case "header_equals":
 			if assertion.Key == "" || assertion.Value == "" {
 				return fmt.Errorf("header_equals assertion requires key and value")
 			}
+		case "json_path":
+			if assertion.Path == "" || assertion.Expected == "" {
+				return fmt.Errorf("json_path assertion requires path and expected")
+			}
+		case "json_path_count":
+			if assertion.Path == "" {
+				return fmt.Errorf("json_path_count assertion requires path")
+			}
+		case "duration_under":
+			if assertion.Under <= 0 {
+				return fmt.Errorf("duration_under assertion requires under (ms)")
+			}
 		default:
 			return fmt.Errorf("unsupported assertion type: %s", assertion.Type)
+		}
+	}
+
+	// Validate extract pointers
+	for name, pointer := range s.Extract {
+		if name == "" {
+			return fmt.Errorf("extract key cannot be empty")
+		}
+		if pointer == "" {
+			return fmt.Errorf("extract pointer for %q cannot be empty", name)
 		}
 	}
 

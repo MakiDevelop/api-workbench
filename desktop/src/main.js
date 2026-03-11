@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { message, open } from "@tauri-apps/plugin-dialog";
 import "./styles.css";
+import { t, getLang, setLang, LANGUAGES } from "./i18n.js";
+import { getTheme, setTheme, applyTheme, THEMES } from "./themes.js";
 
 const app = document.querySelector("#app");
 const REQUEST_TABS = ["params", "headers", "body", "tests"];
@@ -16,7 +18,7 @@ const state = {
   timeoutMs: 15000,
   loading: false,
   error: "",
-  status: "Choose a workspace to start.",
+  status: "",
   lastRun: null,
   requestFilter: "",
   activeRequestTab: "params",
@@ -79,17 +81,19 @@ function render() {
         <div class="brand">
           <div class="brand__mark">AW</div>
           <div>
-            <span class="brand__eyebrow">Desktop Client</span>
-            <strong>API Workbench</strong>
+            <span class="brand__eyebrow">${t("brandSub")}</span>
+            <strong>${t("brand")}</strong>
           </div>
         </div>
         <div class="topbar__meta">
-          <span class="topbar__chip">${workspace ? `${workspace.requests.length} requests` : "No workspace"}</span>
-          <span class="topbar__chip">${state.selectedEnv ? `Env: ${escapeHtml(state.selectedEnv)}` : "Choose env"}</span>
+          <span class="topbar__chip">${workspace ? `${workspace.requests.length} ${t("requests").toLowerCase()}` : t("noWorkspace")}</span>
+          <span class="topbar__chip">${state.selectedEnv ? `Env: ${escapeHtml(state.selectedEnv)}` : t("chooseEnv")}</span>
         </div>
         <div class="topbar__actions">
-          <button class="chrome-button" data-action="pick-workspace">Open Workspace</button>
-          <button class="chrome-button chrome-button--accent" data-action="reload-workspace" ${workspace ? "" : "disabled"}>Reload</button>
+          <select class="settings-select" data-role="lang-select">${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === getLang() ? "selected" : ""}>${l.label}</option>`).join("")}</select>
+          <select class="settings-select" data-role="theme-select">${THEMES.map((th) => `<option value="${th.id}" ${th.id === getTheme() ? "selected" : ""}>${th.label}</option>`).join("")}</select>
+          <button class="chrome-button" data-action="pick-workspace">${t("openWorkspace")}</button>
+          <button class="chrome-button chrome-button--accent" data-action="reload-workspace" ${workspace ? "" : "disabled"}>${t("reload")}</button>
         </div>
       </header>
 
@@ -97,34 +101,34 @@ function render() {
         <aside class="sidebar">
           <section class="sidebar-panel">
             <div class="sidebar-panel__header">
-              <h2>Workspace</h2>
+              <h2>${t("workspace")}</h2>
               <span class="panel-chip ${state.loading ? "panel-chip--loading" : ""}">
-                ${state.loading ? "Busy" : "Ready"}
+                ${state.loading ? t("busy") : t("ready")}
               </span>
             </div>
 
             <label class="field field--stacked">
-              <span>Root Path</span>
+              <span>${t("rootPath")}</span>
               <input
                 type="text"
                 data-role="workspace-input"
                 value="${escapeAttr(state.workspaceDraft || state.workspaceRoot)}"
-                placeholder="/path/to/api-workspace"
+                placeholder="${t("rootPlaceholder")}"
               />
             </label>
 
             <div class="button-row">
-              <button class="ghost-button" data-action="load-workspace">Load</button>
-              <button class="ghost-button" data-action="pick-workspace">Browse</button>
+              <button class="ghost-button" data-action="load-workspace">${t("load")}</button>
+              <button class="ghost-button" data-action="pick-workspace">${t("browse")}</button>
             </div>
 
             <div class="summary-card">
               <div>
-                <span class="summary-card__label">Current Root</span>
-                <strong>${escapeHtml(currentWorkspace() || "Not loaded")}</strong>
+                <span class="summary-card__label">${t("currentRoot")}</span>
+                <strong>${escapeHtml(currentWorkspace() || t("notLoaded"))}</strong>
               </div>
               <div>
-                <span class="summary-card__label">Collection</span>
+                <span class="summary-card__label">${t("collection")}</span>
                 <strong>${escapeHtml(workspace?.collectionPath || "requests")}</strong>
               </div>
             </div>
@@ -132,19 +136,19 @@ function render() {
 
           <section class="sidebar-panel">
             <div class="sidebar-panel__header">
-              <h2>Collections</h2>
+              <h2>${t("collections")}</h2>
               <span class="panel-chip">${workspace?.requests.length ?? 0}</span>
             </div>
             <div class="tree-card ${workspace ? "tree-card--active" : ""}">
-              <span class="tree-card__label">Requests</span>
+              <span class="tree-card__label">${t("requests")}</span>
               <strong>${escapeHtml(workspace?.collectionPath || "requests")}</strong>
-              <span class="tree-card__meta">${workspace ? `${workspace.requests.length} specs loaded` : "Load a workspace to inspect requests."}</span>
+              <span class="tree-card__meta">${workspace ? `${workspace.requests.length} ${t("specsLoaded")}` : t("loadWorkspaceHint")}</span>
             </div>
           </section>
 
           <section class="sidebar-panel">
             <div class="sidebar-panel__header">
-              <h2>Environments</h2>
+              <h2>${t("environments")}</h2>
             </div>
             <div class="env-stack">
               ${renderEnvButtons(workspace)}
@@ -153,19 +157,19 @@ function render() {
 
           <section class="sidebar-panel">
             <div class="sidebar-panel__header">
-              <h2>Runner</h2>
+              <h2>${t("runner")}</h2>
             </div>
             <label class="toggle">
               <input type="checkbox" data-role="snapshot-toggle" ${state.snapshot ? "checked" : ""} />
-              <span>Save snapshots while sending</span>
+              <span>${t("saveSnapshots")}</span>
             </label>
             <label class="field field--stacked">
-              <span>Timeout (ms)</span>
+              <span>${t("timeoutMs")}</span>
               <input type="number" min="1000" step="1000" data-role="timeout-input" value="${state.timeoutMs}" />
             </label>
             <div class="button-stack">
-              <button class="send-button" data-action="run-selected" ${canRunSelected ? "" : "disabled"}>Send</button>
-              <button class="ghost-button" data-action="run-all" ${workspace ? "" : "disabled"}>Run Collection</button>
+              <button class="send-button" data-action="run-selected" ${canRunSelected ? "" : "disabled"}>${t("send")}</button>
+              <button class="ghost-button" data-action="run-all" ${workspace ? "" : "disabled"}>${t("runCollection")}</button>
             </div>
           </section>
         </aside>
@@ -173,8 +177,8 @@ function render() {
         <section class="explorer">
           <div class="panel-topline">
             <div>
-              <span class="panel-caption">Explorer</span>
-              <h2>Requests</h2>
+              <span class="panel-caption">${t("explorer")}</span>
+              <h2>${t("requests")}</h2>
             </div>
             <span class="panel-chip">${requests.length}/${allRequestEntries().length}</span>
           </div>
@@ -184,7 +188,7 @@ function render() {
               type="search"
               data-role="request-filter"
               value="${escapeAttr(state.requestFilter)}"
-              placeholder="Filter by name, path, method, or URL"
+              placeholder="${t("filterPlaceholder")}"
             />
           </label>
 
@@ -197,12 +201,12 @@ function render() {
           <section class="editor-panel">
             <div class="panel-topline panel-topline--editor">
               <div>
-                <span class="panel-caption">Request</span>
-                <h2>${escapeHtml(selected?.name || "Choose a request")}</h2>
+                <span class="panel-caption">${t("request")}</span>
+                <h2>${escapeHtml(selected?.name || t("chooseRequest"))}</h2>
               </div>
               <div class="request-actions">
-                <button class="ghost-button" data-action="run-all" ${workspace ? "" : "disabled"}>Runner</button>
-                <button class="send-button" data-action="run-selected" ${canRunSelected ? "" : "disabled"}>Send</button>
+                <button class="ghost-button" data-action="run-all" ${workspace ? "" : "disabled"}>${t("runner")}</button>
+                <button class="send-button" data-action="run-selected" ${canRunSelected ? "" : "disabled"}>${t("send")}</button>
               </div>
             </div>
 
@@ -224,7 +228,7 @@ function render() {
           <section class="editor-panel editor-panel--response">
             <div class="panel-topline panel-topline--editor">
               <div>
-                <span class="panel-caption">Response</span>
+                <span class="panel-caption">${t("response")}</span>
                 <h2>${escapeHtml(responseTitle(selectedRun, selected))}</h2>
               </div>
               <div class="response-metrics">
@@ -245,7 +249,7 @@ function render() {
       </main>
 
       <footer class="statusbar ${state.error ? "statusbar--error" : ""}">
-        <span class="statusbar__label">${state.error ? "Error" : "Status"}</span>
+        <span class="statusbar__label">${state.error ? t("error") : t("status")}</span>
         <p>${escapeHtml(state.error || state.status)}</p>
       </footer>
     </div>
@@ -256,7 +260,7 @@ function render() {
 
 function renderEnvButtons(workspace) {
   if (!workspace?.envs?.length) {
-    return `<div class="empty-state empty-state--compact">Load a workspace to see env files.</div>`;
+    return `<div class="empty-state empty-state--compact">${t("loadEnvHint")}</div>`;
   }
 
   return workspace.envs
@@ -272,7 +276,7 @@ function renderEnvButtons(workspace) {
 
 function renderRequestList(requests) {
   if (!requests.length) {
-    return `<div class="empty-state">No requests match the current workspace or filter.</div>`;
+    return `<div class="empty-state">${t("chooseRequestHint")}</div>`;
   }
 
   return requests
@@ -282,7 +286,7 @@ function renderRequestList(requests) {
         entry.path === state.selectedRequest ? "request-row--active" : "",
         entry.loadError ? "request-row--invalid" : "",
       ].filter(Boolean).join(" ");
-      const secondaryLine = entry.loadError ? "Invalid request spec" : entry.path;
+      const secondaryLine = entry.loadError ? t("invalidSpec") : entry.path;
 
       return `
         <button class="${classes}" data-action="select-request" data-path="${escapeAttr(entry.path)}">
@@ -312,7 +316,7 @@ function renderTabs(tabs, activeTab, action) {
 
 function renderRequestTabContent(entry, tab) {
   if (!entry) {
-    return `<div class="empty-state">Choose a request from the collection explorer to inspect it.</div>`;
+    return `<div class="empty-state">${t("chooseRequestHint")}</div>`;
   }
 
   if (entry.loadError) {
@@ -328,23 +332,23 @@ function renderRequestTabContent(entry, tab) {
     case "params":
       return renderKeyValueTable(
         sortedEntries(entry.query),
-        "Query parameter",
-        "Value",
-        "No query parameters defined for this request.",
+        t("queryParam"),
+        t("value"),
+        t("noQueryParams"),
       );
     case "headers":
       return renderKeyValueTable(
         sortedEntries(entry.headers),
-        "Header",
-        "Value",
-        "No custom headers defined for this request.",
+        t("header"),
+        t("value"),
+        t("noHeaders"),
       );
     case "body":
-      return renderBodyPanel(entry.body, "This request does not send a body.");
+      return renderBodyPanel(entry.body, t("noBody"));
     case "tests":
       return renderAssertionPanel(entry.assertions);
     default:
-      return `<div class="empty-state">Unknown request tab.</div>`;
+      return `<div class="empty-state">${t("unknownTab")}</div>`;
   }
 }
 
@@ -354,7 +358,7 @@ function renderResponseTabContent(run, requestEntry, tab) {
   }
 
   if (!run) {
-    return `<div class="empty-state">Run the selected request to see response details.</div>`;
+    return `<div class="empty-state">${t("runHint")}</div>`;
   }
 
   switch (tab) {
@@ -366,14 +370,14 @@ function renderResponseTabContent(run, requestEntry, tab) {
     case "headers":
       return renderKeyValueTable(
         sortedEntries(run.result?.headers),
-        "Header",
-        "Value",
-        run.error || "No response headers captured.",
+        t("header"),
+        t("value"),
+        run.error || t("noResponseHeaders"),
       );
     case "tests":
       return renderResponseTests(run, requestEntry);
     default:
-      return `<div class="empty-state">Unknown response tab.</div>`;
+      return `<div class="empty-state">${t("unknownTab")}</div>`;
   }
 }
 
@@ -384,18 +388,18 @@ function renderCollectionSummaryBanner() {
 
   return `
     <div class="collection-banner">
-      <div><span>Total</span><strong>${state.lastRun.summary.total}</strong></div>
-      <div><span>Passed</span><strong>${state.lastRun.summary.passed}</strong></div>
-      <div><span>Failed</span><strong>${state.lastRun.summary.failed}</strong></div>
-      <div><span>Transport</span><strong>${state.lastRun.summary.transport}</strong></div>
-      <div><span>Invalid</span><strong>${state.lastRun.summary.invalid}</strong></div>
+      <div><span>${t("total")}</span><strong>${state.lastRun.summary.total}</strong></div>
+      <div><span>${t("passed")}</span><strong>${state.lastRun.summary.passed}</strong></div>
+      <div><span>${t("failed")}</span><strong>${state.lastRun.summary.failed}</strong></div>
+      <div><span>${t("transport")}</span><strong>${state.lastRun.summary.transport}</strong></div>
+      <div><span>${t("invalid")}</span><strong>${state.lastRun.summary.invalid}</strong></div>
     </div>
   `;
 }
 
 function renderCollectionRuns() {
   if (!state.lastRun || state.lastRun.mode !== "collection") {
-    return `<div class="empty-state">Collection results appear here after you run the collection.</div>`;
+    return `<div class="empty-state">${t("collectionHint")}</div>`;
   }
 
   const runs = state.lastRun.runs
@@ -436,7 +440,7 @@ function renderBodyPanel(body, emptyText) {
 
 function renderAssertionPanel(assertions) {
   if (!assertions?.length) {
-    return `<div class="empty-state">No assertions configured for this request.</div>`;
+    return `<div class="empty-state">${t("noAssertions")}</div>`;
   }
 
   return `
@@ -467,7 +471,7 @@ function renderResponseTests(run, requestEntry) {
       ${failures.length
         ? `
           <div class="test-block">
-            <span class="test-block__label">Failed Assertions</span>
+            <span class="test-block__label">${t("failedAssertions")}</span>
             <div class="assertion-list">
               ${failures
                 .map((message) => `
@@ -482,7 +486,7 @@ function renderResponseTests(run, requestEntry) {
         `
         : ""}
       <div class="test-block">
-        <span class="test-block__label">Configured Assertions</span>
+        <span class="test-block__label">${t("configuredAssertions")}</span>
         ${renderAssertionPanel(configuredAssertions)}
       </div>
     </div>
@@ -514,14 +518,14 @@ function renderKeyValueTable(rows, keyLabel, valueLabel, emptyText) {
 
 function renderResponseMetrics(run) {
   if (!run) {
-    return `<span class="result-pill">Idle</span>`;
+    return `<span class="result-pill">${t("idle")}</span>`;
   }
 
   return [
     `<span class="result-pill result-pill--${statusClass(run.exitCode)}">${escapeHtml(statusLabel(run.exitCode))}</span>`,
     `<span class="result-pill">HTTP ${run.result?.statusCode ?? "n/a"}</span>`,
     `<span class="result-pill">${run.result?.durationMs ?? 0} ms</span>`,
-    `<span class="result-pill">${escapeHtml(run.snapshotPath || "snapshot off")}</span>`,
+    `<span class="result-pill">${escapeHtml(run.snapshotPath || t("snapshotOff"))}</span>`,
   ].join("");
 }
 
@@ -541,58 +545,47 @@ function responseTabs() {
 
 function testHeadline(run, configuredCount, failureCount) {
   if (failureCount > 0) {
-    return `${failureCount} assertion failures`;
+    return `${failureCount} ${t("assertionFailures")}`;
   }
   if (configuredCount === 0) {
-    return run.error || "No assertions configured";
+    return run.error || t("noAssertionsConfigured");
   }
   if (run.exitCode === 0) {
-    return `${configuredCount} assertions passed`;
+    return `${configuredCount} ${t("assertionsPassed")}`;
   }
   return statusLabel(run.exitCode);
 }
 
 function testDetail(run, configuredCount, failureCount) {
   if (failureCount > 0) {
-    return "The response returned data, but one or more expectations failed.";
+    return t("assertionDetail_fail");
   }
   if (run.error) {
     return run.error;
   }
   if (configuredCount === 0) {
-    return "Add assertions to turn this request into a repeatable API check.";
+    return t("assertionDetail_none");
   }
-  return "The current response matched every configured check.";
+  return t("assertionDetail_pass");
 }
 
 function formatAssertion(assertion) {
   switch (assertion.type) {
     case "status":
-      return `Status equals ${assertion.equals}`;
+      return `${t("statusEquals")} ${assertion.equals}`;
     case "body_contains":
-      return `Body contains "${assertion.contains}"`;
+      return `${t("bodyContains")} "${assertion.contains}"`;
     case "header_equals":
-      return `Header ${assertion.key} equals "${assertion.value}"`;
+      return `${t("headerEquals", { key: assertion.key })} "${assertion.value}"`;
+    case "json_path":
+      return `${t("jsonPath", { path: assertion.path })} "${assertion.expected}"`;
     default:
       return assertion.type;
   }
 }
 
 function tabLabel(tab) {
-  switch (tab) {
-    case "params":
-      return "Params";
-    case "headers":
-      return "Headers";
-    case "body":
-      return "Body";
-    case "tests":
-      return "Tests";
-    case "collection":
-      return "Collection";
-    default:
-      return tab;
-  }
+  return t(tab) || tab;
 }
 
 function methodClass(method) {
@@ -671,6 +664,14 @@ function bindEvents() {
   app.querySelector("[data-role='snapshot-toggle']")?.addEventListener("change", (event) => {
     state.snapshot = Boolean(event.target.checked);
   });
+  app.querySelector("[data-role='lang-select']")?.addEventListener("change", (event) => {
+    setLang(event.target.value);
+    render();
+  });
+  app.querySelector("[data-role='theme-select']")?.addEventListener("change", (event) => {
+    setTheme(event.target.value);
+    render();
+  });
 }
 
 async function pickWorkspace() {
@@ -689,14 +690,14 @@ async function pickWorkspace() {
 
 async function loadWorkspace(root) {
   if (!root) {
-    state.error = "Choose a workspace folder first.";
+    state.error = t("chooseWorkspaceFolder");
     render();
     return;
   }
 
   state.loading = true;
   state.error = "";
-  state.status = "Loading workspace...";
+  state.status = t("loadingWorkspace");
   render();
 
   try {
@@ -708,7 +709,7 @@ async function loadWorkspace(root) {
     state.selectedRequest = workspace.requests.some((entry) => entry.path === state.selectedRequest)
       ? state.selectedRequest
       : workspace.requests.find((entry) => !entry.loadError)?.path || workspace.requests[0]?.path || "";
-    state.status = `Loaded ${workspace.requests.length} requests from ${workspace.collectionPath}.`;
+    state.status = `${t("loaded")} ${workspace.requests.length} ${t("requests").toLowerCase()} ${t("from")} ${workspace.collectionPath}`;
     localStorage.setItem("apiw.workspaceRoot", workspace.root);
     localStorage.setItem("apiw.selectedEnv", state.selectedEnv);
   } catch (error) {
@@ -723,14 +724,14 @@ async function loadWorkspace(root) {
 async function runSelected() {
   const selected = selectedRequestEntry();
   if (!state.workspace || !selected || selected.loadError) {
-    state.error = "Select a valid request first.";
+    state.error = t("selectValidRequest");
     render();
     return;
   }
 
   state.loading = true;
   state.error = "";
-  state.status = `Running ${state.selectedRequest}...`;
+  state.status = `${t("running")} ${state.selectedRequest}...`;
   render();
 
   try {
@@ -749,7 +750,7 @@ async function runSelected() {
     state.status = `${statusLabel(result.exitCode)}: ${result.requestPath}`;
   } catch (error) {
     state.error = String(error);
-    await message(state.error, { title: "Run failed", kind: "error" });
+    await message(state.error, { title: t("runFailed"), kind: "error" });
   } finally {
     state.loading = false;
     render();
@@ -758,14 +759,14 @@ async function runSelected() {
 
 async function runAll() {
   if (!state.workspace) {
-    state.error = "Load a workspace first.";
+    state.error = t("loadFirst");
     render();
     return;
   }
 
   state.loading = true;
   state.error = "";
-  state.status = `Running ${state.workspace.collectionPath}...`;
+  state.status = `${t("running")} ${state.workspace.collectionPath}...`;
   render();
 
   try {
@@ -784,7 +785,7 @@ async function runAll() {
     state.status = `${statusLabel(result.exitCode)}: ${result.summary.passed}/${result.summary.total} passed`;
   } catch (error) {
     state.error = String(error);
-    await message(state.error, { title: "Collection failed", kind: "error" });
+    await message(state.error, { title: t("collectionFailed"), kind: "error" });
   } finally {
     state.loading = false;
     render();
@@ -794,15 +795,15 @@ async function runAll() {
 function statusLabel(code) {
   switch (code) {
     case 0:
-      return "passed";
+      return t("passed");
     case 1:
-      return "invalid";
+      return t("invalid");
     case 2:
-      return "transport";
+      return t("transport");
     case 3:
-      return "failed";
+      return t("failed");
     default:
-      return "unknown";
+      return t("unknown");
   }
 }
 
@@ -835,6 +836,8 @@ function escapeAttr(value) {
 }
 
 async function bootstrap() {
+  applyTheme();
+  state.status = t("chooseWorkspaceFirst");
   render();
   const rememberedRoot = localStorage.getItem("apiw.workspaceRoot");
   const rememberedEnv = localStorage.getItem("apiw.selectedEnv");
