@@ -8,8 +8,9 @@ import (
 )
 
 // Load reads a .env file and returns a variable map.
-// File-defined values take precedence over process environment variables.
-// Process env is only used as fallback for keys NOT defined in the file.
+// Only variables explicitly defined in the file are returned.
+// Process environment variables are NOT inherited — this prevents
+// untrusted workspaces from exfiltrating secrets like AWS_SECRET_ACCESS_KEY.
 func Load(path string) (map[string]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -17,7 +18,7 @@ func Load(path string) (map[string]string, error) {
 	}
 	defer file.Close()
 
-	fileValues := make(map[string]string)
+	values := make(map[string]string)
 	scanner := bufio.NewScanner(file)
 	lineNo := 0
 
@@ -33,23 +34,11 @@ func Load(path string) (map[string]string, error) {
 			return nil, fmt.Errorf("%s:%d invalid env entry", path, lineNo)
 		}
 
-		fileValues[strings.TrimSpace(key)] = unquote(strings.TrimSpace(value))
+		values[strings.TrimSpace(key)] = unquote(strings.TrimSpace(value))
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, err
-	}
-
-	// Process env is fallback only: file values always win.
-	values := make(map[string]string, len(fileValues))
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[key] = value
-		}
-	}
-	for key, value := range fileValues {
-		values[key] = value // file wins
 	}
 
 	return values, nil

@@ -659,7 +659,8 @@ function bindEvents() {
     render();
   });
   app.querySelector("[data-role='timeout-input']")?.addEventListener("input", (event) => {
-    state.timeoutMs = Number(event.target.value || 15000);
+    const raw = parseInt(event.target.value, 10);
+    state.timeoutMs = (Number.isFinite(raw) && raw >= 100) ? Math.min(raw, 300000) : 15000;
   });
   app.querySelector("[data-role='snapshot-toggle']")?.addEventListener("change", (event) => {
     state.snapshot = Boolean(event.target.checked);

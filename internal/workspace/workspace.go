@@ -78,6 +78,10 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
+	// Resolve symlinks so paths are consistent with resolvePath output.
+	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
+		root = resolved
+	}
 	if collection == "" {
 		collection = "requests"
 	}
@@ -87,7 +91,12 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 		return Info{}, err
 	}
 
-	requestFiles, err := discover.RequestFiles(resolvePath(root, collection))
+	collectionAbs, err := resolvePath(root, collection)
+	if err != nil {
+		return Info{}, err
+	}
+
+	requestFiles, err := discover.RequestFiles(collectionAbs)
 	if err != nil {
 		return Info{}, err
 	}
@@ -116,7 +125,7 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 
 	return Info{
 		Root:           root,
-		CollectionPath: discover.DisplayRelative(root, resolvePath(root, collection)),
+		CollectionPath: discover.DisplayRelative(root, collectionAbs),
 		Envs:           envs,
 		Requests:       requests,
 	}, nil
@@ -128,7 +137,10 @@ func RunSingle(requestPath string, options RunOptions) (RequestRun, error) {
 		return RequestRun{}, err
 	}
 
-	absRequest := resolvePath(ctx.root, requestPath)
+	absRequest, err := resolvePath(ctx.root, requestPath)
+	if err != nil {
+		return RequestRun{ExitCode: 1, RequestPath: requestPath, Error: err.Error()}, nil
+	}
 	displayRequest := discover.DisplayRelative(ctx.root, absRequest)
 	spec, err := request.Load(absRequest)
 	if err != nil {
@@ -175,7 +187,11 @@ func RunAll(collectionPath string, options RunOptions) (CollectionRun, error) {
 		collectionPath = "requests"
 	}
 
-	requestFiles, err := discover.RequestFiles(resolvePath(ctx.root, collectionPath))
+	collectionAbs, err := resolvePath(ctx.root, collectionPath)
+	if err != nil {
+		return CollectionRun{}, err
+	}
+	requestFiles, err := discover.RequestFiles(collectionAbs)
 	if err != nil {
 		return CollectionRun{}, err
 	}
@@ -193,7 +209,14 @@ func RunAll(collectionPath string, options RunOptions) (CollectionRun, error) {
 	}
 
 	for _, requestFile := range requestFiles {
-		absRequest := resolvePath(ctx.root, requestFile)
+		absRequest, resolveErr := resolvePath(ctx.root, requestFile)
+		if resolveErr != nil {
+			run := RequestRun{ExitCode: 1, RequestPath: requestFile, Error: resolveErr.Error()}
+			response.Runs = append(response.Runs, run)
+			response.Summary.Total++
+			response.Summary.Invalid++
+			continue
+		}
 		displayRequest := discover.DisplayRelative(ctx.root, absRequest)
 		spec, loadErr := request.Load(absRequest)
 
@@ -273,6 +296,9 @@ func prepareContext(options RunOptions) (runContext, error) {
 	if err != nil {
 		return runContext{}, err
 	}
+	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
+		root = resolved
+	}
 
 	envName := options.EnvName
 	if envName == "" {
@@ -333,11 +359,32 @@ func previewBody(body *request.Body) *RequestBodyPreview {
 	return preview
 }
 
-func resolvePath(root, value string) string {
+var errPathTraversal = fmt.Errorf("path escapes workspace root")
+
+func resolvePath(root, value string) (string, error) {
+	var abs string
 	if filepath.IsAbs(value) {
-		return value
+		abs = filepath.Clean(value)
+	} else {
+		abs = filepath.Join(root, value)
 	}
-	return filepath.Join(root, value)
+
+	// Resolve symlinks to catch symlink-based traversal.
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		// Path doesn't exist yet (e.g. snapshot dir) — fall back to lexical check.
+		resolved = abs
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		resolvedRoot = root
+	}
+
+	rel, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", errPathTraversal
+	}
+	return resolved, nil
 }
 
 func classifyRunError(err error) int {

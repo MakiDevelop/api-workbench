@@ -142,14 +142,26 @@ func Run(spec request.Spec, opts Options) (Result, error) {
 		DurationMS: duration.Milliseconds(),
 	}
 
-	messages := evaluateAssertions(expanded.Assertions, result)
+	// Parse response body JSON once for assertions and extraction.
+	var parsedBody any
+	var bodyIsJSON bool
+	if len(result.Body) > 0 {
+		if json.Unmarshal([]byte(result.Body), &parsedBody) == nil {
+			bodyIsJSON = true
+		}
+	}
+
+	messages := evaluateAssertions(expanded.Assertions, result, parsedBody, bodyIsJSON)
 	result.AssertionMessages = messages
 
 	// Extract values from response for chaining
 	if len(spec.Extract) > 0 {
+		if !bodyIsJSON {
+			return result, fmt.Errorf("extract requires JSON response body")
+		}
 		extracted := make(map[string]string, len(spec.Extract))
 		for name, pointer := range spec.Extract {
-			val, extractErr := resolveJSONPointer(result.Body, pointer)
+			val, extractErr := resolveJSONPointerParsed(parsedBody, pointer)
 			if extractErr != nil {
 				return result, fmt.Errorf("extract %q (pointer %s): %w", name, pointer, extractErr)
 			}
@@ -330,7 +342,7 @@ func sanitize(value string) string {
 	return replacer.Replace(value)
 }
 
-func evaluateAssertions(assertions []request.Assertion, result Result) []string {
+func evaluateAssertions(assertions []request.Assertion, result Result, parsedBody any, bodyIsJSON bool) []string {
 	var failures []string
 
 	for _, assertion := range assertions {
@@ -349,11 +361,15 @@ func evaluateAssertions(assertions []request.Assertion, result Result) []string 
 				failures = append(failures, fmt.Sprintf("expected header %s=%q, got %q", assertion.Key, assertion.Value, got))
 			}
 		case "json_path":
-			got, err := resolveJSONPointer(result.Body, assertion.Path)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("json_path %s: %v", assertion.Path, err))
-			} else if got != assertion.Expected {
-				failures = append(failures, fmt.Sprintf("json_path %s: expected %q, got %q", assertion.Path, assertion.Expected, got))
+			if !bodyIsJSON {
+				failures = append(failures, fmt.Sprintf("json_path %s: body is not valid JSON", assertion.Path))
+			} else {
+				got, err := resolveJSONPointerParsed(parsedBody, assertion.Path)
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("json_path %s: %v", assertion.Path, err))
+				} else if got != assertion.Expected {
+					failures = append(failures, fmt.Sprintf("json_path %s: expected %q, got %q", assertion.Path, assertion.Expected, got))
+				}
 			}
 		case "body_regex":
 			matched, err := regexp.MatchString(assertion.Pattern, result.Body)
@@ -367,11 +383,15 @@ func evaluateAssertions(assertions []request.Assertion, result Result) []string 
 				failures = append(failures, fmt.Sprintf("expected duration under %dms, got %dms", assertion.Under, result.DurationMS))
 			}
 		case "json_path_count":
-			count, err := resolveJSONArrayLength(result.Body, assertion.Path)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("json_path_count %s: %v", assertion.Path, err))
-			} else if count != assertion.Equals {
-				failures = append(failures, fmt.Sprintf("json_path_count %s: expected %d items, got %d", assertion.Path, assertion.Equals, count))
+			if !bodyIsJSON {
+				failures = append(failures, fmt.Sprintf("json_path_count %s: body is not valid JSON", assertion.Path))
+			} else {
+				count, err := resolveJSONArrayLengthParsed(parsedBody, assertion.Path)
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("json_path_count %s: %v", assertion.Path, err))
+				} else if count != assertion.Equals {
+					failures = append(failures, fmt.Sprintf("json_path_count %s: expected %d items, got %d", assertion.Path, assertion.Equals, count))
+				}
 			}
 		}
 	}
@@ -392,20 +412,15 @@ func lookupHeader(headers map[string]string, key string) string {
 	return ""
 }
 
-// resolveJSONPointer evaluates an RFC 6901 JSON Pointer against a JSON body.
-// e.g. "/user/name" on {"user":{"name":"alice"}} returns "alice".
-func resolveJSONPointer(body string, pointer string) (string, error) {
-	var data any
-	if err := json.Unmarshal([]byte(body), &data); err != nil {
-		return "", fmt.Errorf("body is not valid JSON: %w", err)
-	}
-
+// traversePointer walks a pre-parsed JSON value using an RFC 6901 JSON Pointer.
+// data may be nil for a valid JSON null body.
+func traversePointer(data any, pointer string) (any, error) {
 	if pointer == "" || pointer == "/" {
-		return fmt.Sprintf("%v", data), nil
+		return data, nil
 	}
 
 	if !strings.HasPrefix(pointer, "/") {
-		return "", fmt.Errorf("JSON pointer must start with /")
+		return nil, fmt.Errorf("JSON pointer must start with /")
 	}
 
 	parts := strings.Split(pointer[1:], "/")
@@ -420,85 +435,83 @@ func resolveJSONPointer(body string, pointer string) (string, error) {
 		case map[string]any:
 			val, ok := node[part]
 			if !ok {
-				return "", fmt.Errorf("key %q not found", part)
+				return nil, fmt.Errorf("key %q not found", part)
 			}
 			current = val
 		case []any:
 			var idx int
 			if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
-				return "", fmt.Errorf("expected array index, got %q", part)
+				return nil, fmt.Errorf("expected array index, got %q", part)
 			}
 			if idx < 0 || idx >= len(node) {
-				return "", fmt.Errorf("array index %d out of range (length %d)", idx, len(node))
+				return nil, fmt.Errorf("array index %d out of range (length %d)", idx, len(node))
 			}
 			current = node[idx]
 		default:
-			return "", fmt.Errorf("cannot traverse into %T at %q", current, part)
+			return nil, fmt.Errorf("cannot traverse into %T at %q", current, part)
 		}
 	}
 
+	return current, nil
+}
+
+func formatValue(current any) string {
 	switch v := current.(type) {
 	case string:
-		return v, nil
+		return v
 	case float64:
 		if v == float64(int64(v)) {
-			return fmt.Sprintf("%d", int64(v)), nil
+			return fmt.Sprintf("%d", int64(v))
 		}
-		return fmt.Sprintf("%g", v), nil
+		return fmt.Sprintf("%g", v)
 	case bool:
-		return fmt.Sprintf("%t", v), nil
+		return fmt.Sprintf("%t", v)
 	case nil:
-		return "null", nil
+		return "null"
 	default:
 		raw, _ := json.Marshal(v)
-		return string(raw), nil
+		return string(raw)
 	}
 }
 
-// resolveJSONArrayLength evaluates a JSON Pointer and returns the length of the array at that path.
-func resolveJSONArrayLength(body string, pointer string) (int, error) {
-	var data any
-	if err := json.Unmarshal([]byte(body), &data); err != nil {
-		return 0, fmt.Errorf("body is not valid JSON: %w", err)
+// resolveJSONPointerParsed evaluates an RFC 6901 JSON Pointer against pre-parsed data.
+func resolveJSONPointerParsed(data any, pointer string) (string, error) {
+	current, err := traversePointer(data, pointer)
+	if err != nil {
+		return "", err
 	}
+	return formatValue(current), nil
+}
 
-	current := data
-
-	if pointer != "" && pointer != "/" {
-		if !strings.HasPrefix(pointer, "/") {
-			return 0, fmt.Errorf("JSON pointer must start with /")
-		}
-
-		parts := strings.Split(pointer[1:], "/")
-		for _, part := range parts {
-			part = strings.ReplaceAll(part, "~1", "/")
-			part = strings.ReplaceAll(part, "~0", "~")
-
-			switch node := current.(type) {
-			case map[string]any:
-				val, ok := node[part]
-				if !ok {
-					return 0, fmt.Errorf("key %q not found", part)
-				}
-				current = val
-			case []any:
-				var idx int
-				if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
-					return 0, fmt.Errorf("expected array index, got %q", part)
-				}
-				if idx < 0 || idx >= len(node) {
-					return 0, fmt.Errorf("array index %d out of range (length %d)", idx, len(node))
-				}
-				current = node[idx]
-			default:
-				return 0, fmt.Errorf("cannot traverse into %T at %q", current, part)
-			}
-		}
+// resolveJSONArrayLengthParsed evaluates a JSON Pointer on pre-parsed data and returns the array length.
+func resolveJSONArrayLengthParsed(data any, pointer string) (int, error) {
+	current, err := traversePointer(data, pointer)
+	if err != nil {
+		return 0, err
 	}
-
 	arr, ok := current.([]any)
 	if !ok {
 		return 0, fmt.Errorf("value at %q is not an array", pointer)
 	}
 	return len(arr), nil
+}
+
+// resolveJSONPointer evaluates an RFC 6901 JSON Pointer against a JSON body string.
+// Kept for backward compatibility with tests.
+func resolveJSONPointer(body string, pointer string) (string, error) {
+	var data any
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		return "", fmt.Errorf("body is not valid JSON: %w", err)
+	}
+	return resolveJSONPointerParsed(data, pointer)
+}
+
+// resolveJSONArrayLength evaluates a JSON Pointer and returns the length of the array at that path.
+// Kept for backward compatibility with tests.
+func resolveJSONArrayLength(body string, pointer string) (int, error) {
+	var data any
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		return 0, fmt.Errorf("body is not valid JSON: %w", err)
+	}
+	return resolveJSONArrayLengthParsed(data, pointer)
 }
