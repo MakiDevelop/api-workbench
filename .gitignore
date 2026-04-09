@@ -6,3 +6,7 @@ node_modules/
 src-tauri/binaries/
 src-tauri/gen/
 src-tauri/target/
+
+# Claude Code project config
+CLAUDE.md
+CLAUDE-*.md
