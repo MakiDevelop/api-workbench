@@ -1,5 +1,11 @@
 # API Workbench
 
+> The Git-native API client for CLI, Desktop, and CI.
+
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8)
+![Tauri](https://img.shields.io/badge/Tauri-2-FFC131)
+
 **CLI-first API workbench — requests live in Git, run in terminal & CI, with a desktop GUI.**
 
 [English](#english) | [繁體中文](#繁體中文) | [日本語](#日本語)

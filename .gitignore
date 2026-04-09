@@ -10,3 +10,4 @@ src-tauri/target/
 # Claude Code project config
 CLAUDE.md
 CLAUDE-*.md
+.claude/
