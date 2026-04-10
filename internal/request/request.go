@@ -10,10 +10,10 @@ type Spec struct {
 	Name       string            `json:"name"`
 	Method     string            `json:"method"`
 	URL        string            `json:"url"`
-	Headers    map[string]string `json:"headers"`
-	Query      map[string]string `json:"query"`
-	Assertions []Assertion       `json:"assertions"`
-	Body       *Body             `json:"body"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	Query      map[string]string `json:"query,omitempty"`
+	Assertions []Assertion       `json:"assertions,omitempty"`
+	Body       *Body             `json:"body,omitempty"`
 	Auth       *Auth             `json:"auth,omitempty"`    // optional auth preset — resolved to headers at runtime
 	Extract    map[string]string `json:"extract,omitempty"` // name → JSON pointer, extracted values become variables for subsequent requests
 }

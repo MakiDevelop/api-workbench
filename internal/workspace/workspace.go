@@ -628,8 +628,23 @@ func DiffSnapshots(root, leftPath, rightPath string) (diff.SnapshotDiff, error) 
 }
 
 func sanitizeFilename(name string) string {
+	// Split camelCase / PascalCase into dash-separated words.
+	// e.g. "listPets" -> "list-Pets", "HTTPServer" -> "HTTP-Server".
+	var split strings.Builder
+	runes := []rune(name)
+	for i, ch := range runes {
+		if i > 0 && ch >= 'A' && ch <= 'Z' {
+			prev := runes[i-1]
+			// Insert dash when transitioning from lower/digit to upper.
+			if (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
+				split.WriteRune('-')
+			}
+		}
+		split.WriteRune(ch)
+	}
+
 	var b strings.Builder
-	for _, ch := range strings.ToLower(name) {
+	for _, ch := range strings.ToLower(split.String()) {
 		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
 			b.WriteRune(ch)
 		} else if ch == ' ' || ch == '/' {
@@ -637,6 +652,10 @@ func sanitizeFilename(name string) string {
 		}
 	}
 	result := b.String()
+	// Collapse consecutive dashes.
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
 	result = strings.Trim(result, "-")
 	if len(result) > 80 {
 		result = result[:80]
