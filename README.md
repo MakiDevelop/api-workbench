@@ -26,11 +26,36 @@ A lightweight, zero-dependency API testing tool built around a simple idea:
 
 ### Install
 
-**macOS Desktop App (Apple Silicon)**
+Pre-built binaries are available on the [Releases](https://github.com/MakiDevelop/api-workbench/releases/latest) page.
 
-Download `API.Workbench_0.1.0_aarch64.dmg` from the [Releases](https://github.com/MakiDevelop/api-workbench/releases) page.
+**Desktop App**
 
-**CLI only**
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `API.Workbench_0.3.0_aarch64.dmg` |
+| Windows (x64) | `API.Workbench_0.3.0_x64-setup.exe` |
+| Linux (amd64) | `API.Workbench_0.3.0_amd64.deb` |
+
+> **⚠️ macOS: "API Workbench is damaged and can't be opened"**
+>
+> The app is **not signed with an Apple Developer ID** (the project doesn't pay for a Developer Program membership yet). macOS Gatekeeper therefore shows a misleading "damaged" error on first launch. The app is not actually damaged — you just need to remove the quarantine attribute once:
+>
+> ```bash
+> xattr -cr "/Applications/API Workbench.app"
+> ```
+>
+> After that, double-click to launch normally. This is a one-time step per download.
+
+**CLI**
+
+Download a pre-built binary from Releases:
+
+- `apiw-darwin-arm64` — macOS Apple Silicon
+- `apiw-darwin-amd64` — macOS Intel
+- `apiw-linux-amd64` — Linux
+- `apiw-windows-amd64.exe` — Windows
+
+Or install via `go install`:
 
 ```bash
 go install github.com/MakiDevelop/api-workbench/cmd/apiw@latest
@@ -227,11 +252,36 @@ npm run tauri:build:mac
 
 ### 安裝
 
-**macOS 桌面 App（Apple Silicon）**
+預先打包的執行檔在 [Releases](https://github.com/MakiDevelop/api-workbench/releases/latest) 頁面。
 
-從 [Releases](https://github.com/MakiDevelop/api-workbench/releases) 頁面下載 `API.Workbench_0.1.0_aarch64.dmg`。
+**桌面 App**
 
-**僅安裝 CLI**
+| 平台 | 檔案 |
+|------|------|
+| macOS（Apple Silicon） | `API.Workbench_0.3.0_aarch64.dmg` |
+| Windows（x64） | `API.Workbench_0.3.0_x64-setup.exe` |
+| Linux（amd64） | `API.Workbench_0.3.0_amd64.deb` |
+
+> **⚠️ macOS 顯示「API Workbench 已損毀，無法打開」？**
+>
+> 這支 app **沒有用 Apple Developer ID 簽名**（本專案還沒付 Apple Developer Program 年費），macOS Gatekeeper 會顯示誤導性的「已損毀」錯誤訊息。app 並沒有壞，只要跑一次這個命令移除 quarantine 屬性即可：
+>
+> ```bash
+> xattr -cr "/Applications/API Workbench.app"
+> ```
+>
+> 跑完雙擊就能正常開啟。每次下載新版本需重做一次。
+
+**CLI**
+
+從 Releases 頁面下載預先編譯的 binary：
+
+- `apiw-darwin-arm64` — macOS Apple Silicon
+- `apiw-darwin-amd64` — macOS Intel
+- `apiw-linux-amd64` — Linux
+- `apiw-windows-amd64.exe` — Windows
+
+或用 `go install`：
 
 ```bash
 go install github.com/MakiDevelop/api-workbench/cmd/apiw@latest
@@ -411,11 +461,36 @@ Tauri 原生桌面 app 提供：
 
 ### インストール
 
-**macOS デスクトップアプリ（Apple Silicon）**
+ビルド済みバイナリは [Releases](https://github.com/MakiDevelop/api-workbench/releases/latest) ページからダウンロードできます。
 
-[Releases](https://github.com/MakiDevelop/api-workbench/releases) ページから `API.Workbench_0.1.0_aarch64.dmg` をダウンロード。
+**デスクトップアプリ**
 
-**CLI のみ**
+| プラットフォーム | ファイル |
+|----------------|---------|
+| macOS（Apple Silicon） | `API.Workbench_0.3.0_aarch64.dmg` |
+| Windows（x64） | `API.Workbench_0.3.0_x64-setup.exe` |
+| Linux（amd64） | `API.Workbench_0.3.0_amd64.deb` |
+
+> **⚠️ macOS で「API Workbench は壊れているため開けません」と表示される場合**
+>
+> このアプリは **Apple Developer ID で署名されていません**（プロジェクトはまだ Developer Program に加入していません）。そのため macOS Gatekeeper が誤解を招く「壊れている」エラーを表示します。実際には壊れていません。以下のコマンドで quarantine 属性を一度だけ解除してください：
+>
+> ```bash
+> xattr -cr "/Applications/API Workbench.app"
+> ```
+>
+> 実行後、通常どおりダブルクリックで起動できます。新バージョンをダウンロードするたびに一度実行する必要があります。
+
+**CLI**
+
+Releases ページからビルド済みバイナリをダウンロード：
+
+- `apiw-darwin-arm64` — macOS Apple Silicon
+- `apiw-darwin-amd64` — macOS Intel
+- `apiw-linux-amd64` — Linux
+- `apiw-windows-amd64.exe` — Windows
+
+または `go install`：
 
 ```bash
 go install github.com/MakiDevelop/api-workbench/cmd/apiw@latest
