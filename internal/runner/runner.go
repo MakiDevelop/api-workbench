@@ -2,8 +2,13 @@ package runner
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -11,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -311,6 +317,15 @@ func expandMap(input map[string]string, vars map[string]string) (map[string]stri
 func expandString(value string, vars map[string]string) (string, error) {
 	var missing []string
 	result := os.Expand(value, func(key string) string {
+		// Built-in template functions (prefix __).
+		if strings.HasPrefix(key, "__") {
+			resolved, ok := evalBuiltin(key, vars)
+			if ok {
+				return resolved
+			}
+			missing = append(missing, key)
+			return ""
+		}
 		if v, ok := vars[key]; ok {
 			return v
 		}
@@ -321,6 +336,65 @@ func expandString(value string, vars map[string]string) (string, error) {
 		return result, fmt.Errorf("undefined variable(s): %s", strings.Join(missing, ", "))
 	}
 	return result, nil
+}
+
+// evalBuiltin resolves built-in template functions.
+// Supported: __now, __timestamp, __uuid, __randomInt[:max],
+// __base64:VAR, __sha256:VAR, __hmac_sha256:KEY_VAR:MSG_VAR
+func evalBuiltin(key string, vars map[string]string) (string, bool) {
+	// Strip __ prefix.
+	name := strings.TrimPrefix(key, "__")
+
+	// Split on ":" for function arguments.
+	parts := strings.Split(name, ":")
+	fn := parts[0]
+	args := parts[1:]
+
+	switch fn {
+	case "now":
+		return time.Now().UTC().Format(time.RFC3339), true
+	case "timestamp":
+		return fmt.Sprintf("%d", time.Now().Unix()), true
+	case "timestampMs":
+		return fmt.Sprintf("%d", time.Now().UnixMilli()), true
+	case "uuid":
+		return generateUUID(), true
+	case "randomInt":
+		max := 1000000
+		if len(args) >= 1 {
+			if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
+				max = n
+			}
+		}
+		return fmt.Sprintf("%d", randomInt(max)), true
+	case "base64":
+		if len(args) < 1 {
+			return "", false
+		}
+		src := lookupVarOrLiteral(args[0], vars)
+		return basicAuthEncode(src), true
+	case "sha256":
+		if len(args) < 1 {
+			return "", false
+		}
+		src := lookupVarOrLiteral(args[0], vars)
+		return sha256Hex(src), true
+	case "hmac_sha256":
+		if len(args) < 2 {
+			return "", false
+		}
+		keyVal := lookupVarOrLiteral(args[0], vars)
+		msgVal := lookupVarOrLiteral(args[1], vars)
+		return hmacSHA256Hex(keyVal, msgVal), true
+	}
+	return "", false
+}
+
+func lookupVarOrLiteral(name string, vars map[string]string) string {
+	if v, ok := vars[name]; ok {
+		return v
+	}
+	return name
 }
 
 func renderBody(body *request.Body) ([]byte, string, error) {
@@ -624,6 +698,38 @@ func resolveJSONArrayLength(body string, pointer string) (int, error) {
 		return 0, fmt.Errorf("body is not valid JSON: %w", err)
 	}
 	return resolveJSONArrayLengthParsed(data, pointer)
+}
+
+func generateUUID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant RFC 4122
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func randomInt(max int) int {
+	if max <= 0 {
+		return 0
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0
+	}
+	return int(n.Int64())
+}
+
+func sha256Hex(input string) string {
+	h := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(h[:])
+}
+
+func hmacSHA256Hex(key, msg string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(msg))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 const b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"

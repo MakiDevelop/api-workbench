@@ -1148,6 +1148,119 @@ pre {
   color: var(--danger);
 }
 
+/* ---- History Tab ---- */
+.history-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+
+.history-row__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.history-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.history-row__url {
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+
+.history-row__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.history-time {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.history-error {
+  color: var(--danger);
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ---- Graph Modal ---- */
+.modal-box--wide {
+  min-width: 680px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.graph-container {
+  margin: 12px 0;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 520px;
+  color: var(--text);
+}
+
+.graph-container svg {
+  display: block;
+}
+
+/* ---- Import Modal Tabs ---- */
+.modal-tab-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.modal-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .inline-chip--edit {
   background: var(--accent-soft);
   color: var(--accent);

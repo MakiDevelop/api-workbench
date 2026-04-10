@@ -6,7 +6,7 @@ import { getTheme, setTheme, applyTheme, THEMES } from "./themes.js";
 
 const app = document.querySelector("#app");
 const REQUEST_TABS = ["params", "headers", "auth", "body", "tests"];
-const RESPONSE_TABS = ["body", "headers", "tests", "collection", "snapshots"];
+const RESPONSE_TABS = ["body", "headers", "tests", "collection", "snapshots", "history"];
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -29,10 +29,14 @@ const state = {
   editDraft: null,
   showImportModal: false,
   importCurlText: "",
+  importFormat: "curl", // "curl" | "openapi"
+  importOpenAPIText: "",
   snapshots: [],
   diffResult: null,
   diffLeft: "",
   diffRight: "",
+  history: [],
+  showGraph: false,
 };
 
 function allRequestEntries() {
@@ -103,6 +107,7 @@ function render() {
           <select class="settings-select" data-role="lang-select">${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === getLang() ? "selected" : ""}>${l.label}</option>`).join("")}</select>
           <select class="settings-select" data-role="theme-select">${THEMES.map((th) => `<option value="${th.id}" ${th.id === getTheme() ? "selected" : ""}>${th.label}</option>`).join("")}</select>
           <button class="chrome-button" data-action="import-curl" ${workspace ? "" : "disabled"}>${t("importCurl")}</button>
+          <button class="chrome-button" data-action="show-graph" ${workspace ? "" : "disabled"}>${t("graph")}</button>
           <button class="chrome-button" data-action="pick-workspace">${t("openWorkspace")}</button>
           <button class="chrome-button chrome-button--accent" data-action="reload-workspace" ${workspace ? "" : "disabled"}>${t("reload")}</button>
         </div>
@@ -269,6 +274,7 @@ function render() {
       </main>
 
       ${state.showImportModal ? renderImportModal() : ""}
+      ${state.showGraph ? renderGraphModal() : ""}
 
       <footer class="statusbar ${state.error ? "statusbar--error" : ""}">
         <span class="statusbar__label">${state.error ? t("error") : t("status")}</span>
@@ -383,6 +389,9 @@ function renderResponseTabContent(run, requestEntry, tab) {
   if (tab === "snapshots") {
     return renderSnapshotsTab();
   }
+  if (tab === "history") {
+    return renderHistoryTab();
+  }
 
   if (!run) {
     return `<div class="empty-state">${t("runHint")}</div>`;
@@ -488,6 +497,183 @@ function renderSnapshotsTab() {
   `;
 }
 
+function renderGraphModal() {
+  const graph = buildDependencyGraph();
+
+  return `
+    <div class="modal-overlay" data-action="close-graph">
+      <div class="modal-box modal-box--wide" onclick="event.stopPropagation()">
+        <h3>${t("dependencyGraph")}</h3>
+        ${graph.nodes.length === 0
+          ? `<div class="empty-state">${t("noGraphData")}</div>`
+          : renderGraphSVG(graph)
+        }
+        <div class="modal-actions">
+          <button class="ghost-button" data-action="close-graph">${t("close")}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildDependencyGraph() {
+  const requests = allRequestEntries().filter((r) => !r.loadError);
+  const nodes = requests.map((r) => ({
+    path: r.path,
+    name: r.name || r.path,
+    method: r.method,
+  }));
+
+  const varConsumers = new Map();
+  const varPattern = /\$\{?([A-Z_][A-Z0-9_]*)\}?/g;
+
+  requests.forEach((r) => {
+    const textBlob = [
+      r.url || "",
+      ...Object.values(r.query || {}),
+      ...Object.values(r.headers || {}),
+      r.body?.content || "",
+    ].join(" ");
+
+    const consumed = new Set();
+    let match;
+    while ((match = varPattern.exec(textBlob)) !== null) {
+      if (match[1].startsWith("__")) continue;
+      consumed.add(match[1]);
+    }
+    consumed.forEach((v) => {
+      if (!varConsumers.has(v)) varConsumers.set(v, []);
+      varConsumers.get(v).push(r.path);
+    });
+  });
+
+  const edges = [];
+  varConsumers.forEach((users, varName) => {
+    if (users.length >= 2) {
+      for (let i = 0; i < users.length - 1; i++) {
+        edges.push({ from: users[i], to: users[i + 1], label: varName });
+      }
+    }
+  });
+
+  return { nodes, edges };
+}
+
+function renderGraphSVG(graph) {
+  const nodeWidth = 220;
+  const nodeHeight = 58;
+  const verticalSpacing = 90;
+  const padding = 24;
+  const height = Math.max(graph.nodes.length * verticalSpacing + padding * 2, 200);
+  const width = nodeWidth + padding * 2 + 80;
+
+  const nodePositions = new Map();
+  graph.nodes.forEach((n, i) => {
+    nodePositions.set(n.path, {
+      x: padding + 40,
+      y: padding + i * verticalSpacing,
+    });
+  });
+
+  const edgeLines = graph.edges.map((edge) => {
+    const from = nodePositions.get(edge.from);
+    const to = nodePositions.get(edge.to);
+    if (!from || !to) return "";
+    const x1 = from.x + nodeWidth / 2;
+    const y1 = from.y + nodeHeight;
+    const x2 = to.x + nodeWidth / 2;
+    const y2 = to.y;
+    return `
+      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="1.5" opacity="0.4" marker-end="url(#arrow)" />
+      <text x="${(x1 + x2) / 2 + 6}" y="${(y1 + y2) / 2}" fill="currentColor" font-size="10" opacity="0.7">${escapeHtml(edge.label)}</text>
+    `;
+  }).join("");
+
+  const nodeBoxes = graph.nodes.map((n) => {
+    const pos = nodePositions.get(n.path);
+    return `
+      <g>
+        <rect x="${pos.x}" y="${pos.y}" width="${nodeWidth}" height="${nodeHeight}" rx="6" ry="6"
+              fill="var(--panel-elevated)" stroke="var(--line-strong)" stroke-width="1" />
+        <text x="${pos.x + 12}" y="${pos.y + 22}" fill="var(--text)" font-size="13" font-weight="700">
+          ${escapeHtml(truncateText(n.name, 24))}
+        </text>
+        <text x="${pos.x + 12}" y="${pos.y + 42}" fill="var(--muted)" font-size="11">
+          ${escapeHtml(n.method || "")} · ${escapeHtml(truncateText(n.path, 30))}
+        </text>
+      </g>
+    `;
+  }).join("");
+
+  return `
+    <div class="graph-container">
+      <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" opacity="0.6" />
+          </marker>
+        </defs>
+        ${edgeLines}
+        ${nodeBoxes}
+      </svg>
+    </div>
+  `;
+}
+
+function truncateText(s, max) {
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function renderHistoryTab() {
+  if (!state.workspace) {
+    return `<div class="empty-state">${t("loadFirst")}</div>`;
+  }
+
+  const rows = state.history.length > 0
+    ? state.history.map((h) => {
+        const statusClass = h.exitCode === 0 ? "passed" : (h.exitCode === 3 ? "failed" : h.exitCode === 2 ? "transport" : "invalid");
+        return `
+          <div class="history-row">
+            <div class="history-row__left">
+              <span class="result-pill result-pill--${statusClass}">${h.statusCode || "—"}</span>
+              <span class="method-badge method-badge--${methodClass(h.method)}">${escapeHtml(h.method || "?")}</span>
+              <div class="history-row__info">
+                <strong>${escapeHtml(h.requestName || h.requestPath || "?")}</strong>
+                <span class="history-row__url">${escapeHtml(h.url || "")}</span>
+              </div>
+            </div>
+            <div class="history-row__right">
+              <span class="history-time">${escapeHtml(formatHistoryTime(h.timestamp))}</span>
+              <span class="history-meta">${h.durationMs || 0} ms · ${escapeHtml(h.env || "")}</span>
+              ${h.error ? `<span class="history-error">${escapeHtml(h.error)}</span>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")
+    : `<div class="empty-state">${t("noHistory")}</div>`;
+
+  return `
+    <div class="history-tab">
+      <div class="snapshots-toolbar">
+        <button class="ghost-button" data-action="load-history">${t("refreshSnapshots")}</button>
+        <span class="history-count">${state.history.length} entries</span>
+      </div>
+      <div class="history-list">${rows}</div>
+    </div>
+  `;
+}
+
+function formatHistoryTime(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
 function renderDiffResult(diff) {
   if (diff.same) {
     return `<div class="callout callout--success"><strong>${t("noDifferences")}</strong></div>`;
@@ -587,14 +773,23 @@ function renderAuthPanel(auth, editable) {
 }
 
 function renderImportModal() {
+  const isCurl = state.importFormat === "curl";
   return `
     <div class="modal-overlay" data-action="close-import">
       <div class="modal-box" onclick="event.stopPropagation()">
         <h3>${t("importCurl")}</h3>
-        <textarea class="import-textarea" data-role="import-curl-input" rows="8" placeholder="${escapeAttr(t("importCurlPlaceholder"))}">${escapeHtml(state.importCurlText)}</textarea>
+        <div class="modal-tab-row">
+          <button class="tab-button ${isCurl ? "tab-button--active" : ""}" data-action="set-import-format" data-format="curl">cURL</button>
+          <button class="tab-button ${!isCurl ? "tab-button--active" : ""}" data-action="set-import-format" data-format="openapi">OpenAPI JSON</button>
+        </div>
+        ${isCurl
+          ? `<textarea class="import-textarea" data-role="import-curl-input" rows="8" placeholder="${escapeAttr(t("importCurlPlaceholder"))}">${escapeHtml(state.importCurlText)}</textarea>`
+          : `<textarea class="import-textarea" data-role="import-openapi-input" rows="12" placeholder="${escapeAttr(t("importOpenAPIPlaceholder"))}">${escapeHtml(state.importOpenAPIText)}</textarea>
+             <p class="modal-hint">${t("importOpenAPIHint")}</p>`
+        }
         <div class="modal-actions">
           <button class="ghost-button" data-action="close-import">${t("cancel")}</button>
-          <button class="send-button" data-action="do-import-curl">${t("importBtn")}</button>
+          <button class="send-button" data-action="${isCurl ? "do-import-curl" : "do-import-openapi"}">${t("importBtn")}</button>
         </div>
       </div>
     </div>
@@ -774,11 +969,10 @@ function responseTitle(run, requestEntry) {
 }
 
 function responseTabs() {
-  const tabs = RESPONSE_TABS.filter((tab) => {
+  return RESPONSE_TABS.filter((tab) => {
     if (tab === "collection" && state.lastRun?.mode !== "collection") return false;
     return true;
   });
-  return tabs;
 }
 
 function testHeadline(run, configuredCount, failureCount) {
@@ -871,6 +1065,37 @@ function bindEvents() {
   app.querySelectorAll("[data-action='load-snapshots']").forEach((button) => {
     button.addEventListener("click", loadSnapshots);
   });
+  app.querySelectorAll("[data-action='load-history']").forEach((button) => {
+    button.addEventListener("click", loadHistory);
+  });
+  app.querySelectorAll("[data-action='show-graph']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.showGraph = true;
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='close-graph']").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.showGraph = false;
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='set-import-format']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.importFormat = button.dataset.format;
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='do-import-openapi']").forEach((button) => {
+    button.addEventListener("click", doImportOpenAPI);
+  });
+  app.querySelector("[data-role='import-openapi-input']")?.addEventListener("input", (event) => {
+    state.importOpenAPIText = event.target.value;
+  });
+  // Auto-load history when user switches to history tab.
+  if (state.activeResponseTab === "history" && state.workspace && state.history.length === 0) {
+    setTimeout(() => loadHistory(), 0);
+  }
   app.querySelectorAll("[data-action='run-diff']").forEach((button) => {
     button.addEventListener("click", runDiff);
   });
@@ -1289,6 +1514,48 @@ async function saveRequest() {
     state.editing = false;
     state.editDraft = null;
     state.status = t("saveSuccess");
+    await loadWorkspace(state.workspace.root);
+  } catch (error) {
+    state.error = String(error);
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+async function loadHistory() {
+  if (!state.workspace) return;
+
+  try {
+    const entries = await invoke("list_history_gui", {
+      root: state.workspace.root,
+      limit: 200,
+    });
+    state.history = entries || [];
+    state.status = `${state.history.length} history entries loaded`;
+  } catch (error) {
+    state.error = String(error);
+  }
+  render();
+}
+
+async function doImportOpenAPI() {
+  if (!state.importOpenAPIText.trim() || !state.workspace) return;
+
+  state.loading = true;
+  state.error = "";
+  state.showImportModal = false;
+  render();
+
+  try {
+    const result = await invoke("import_openapi_gui", {
+      root: state.workspace.root,
+      content: state.importOpenAPIText,
+      collection: state.workspace.collectionPath || "requests",
+    });
+    const count = result?.savedPaths?.length || 0;
+    state.status = `Imported ${count} request(s) from OpenAPI spec`;
+    state.importOpenAPIText = "";
     await loadWorkspace(state.workspace.root);
   } catch (error) {
     state.error = String(error);

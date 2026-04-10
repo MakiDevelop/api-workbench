@@ -54,5 +54,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  apiw run <request-file> [--env local] [--timeout 15s] [--snapshot]")
 	fmt.Fprintln(w, "  apiw run --all [requests-dir] [--env local] [--timeout 15s] [--snapshot]")
 	fmt.Fprintln(w, "  apiw import curl <curl-command>")
+	fmt.Fprintln(w, "  apiw import openapi <path-to-spec.json>")
 	fmt.Fprintln(w, "  apiw tui [requests-dir] [--env local] [--timeout 15s] [--snapshot]")
 }

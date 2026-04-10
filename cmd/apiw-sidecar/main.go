@@ -104,6 +104,17 @@ type diffSnapshotsParams struct {
 	RightPath string `json:"rightPath"`
 }
 
+type listHistoryParams struct {
+	Root  string `json:"root"`
+	Limit int    `json:"limit"`
+}
+
+type importOpenAPIParams struct {
+	Root       string `json:"root"`
+	Content    string `json:"content"`
+	Collection string `json:"collection"`
+}
+
 // --- Serve mode: persistent JSON-RPC on stdin/stdout ---
 
 func runServe(stdin io.Reader, stdout, stderr *os.File) int {
@@ -279,6 +290,34 @@ func handleRPC(req rpcRequest) rpcResponse {
 			return base
 		}
 		base.Result = result
+		return base
+
+	case "list_history":
+		var p listHistoryParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			base.Error = "invalid params: " + err.Error()
+			return base
+		}
+		entries, err := workspace.ListHistory(p.Root, p.Limit)
+		if err != nil {
+			base.Error = err.Error()
+			return base
+		}
+		base.Result = entries
+		return base
+
+	case "import_openapi":
+		var p importOpenAPIParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			base.Error = "invalid params: " + err.Error()
+			return base
+		}
+		savedPaths, err := workspace.ImportOpenAPI(p.Root, []byte(p.Content), p.Collection)
+		if err != nil {
+			base.Error = err.Error()
+			return base
+		}
+		base.Result = map[string]any{"savedPaths": savedPaths}
 		return base
 
 	case "shutdown":

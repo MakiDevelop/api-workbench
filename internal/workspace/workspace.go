@@ -15,6 +15,8 @@ import (
 	"github.com/MakiDevelop/api-workbench/internal/diff"
 	"github.com/MakiDevelop/api-workbench/internal/discover"
 	"github.com/MakiDevelop/api-workbench/internal/envfile"
+	"github.com/MakiDevelop/api-workbench/internal/history"
+	"github.com/MakiDevelop/api-workbench/internal/openapiimport"
 	"github.com/MakiDevelop/api-workbench/internal/project"
 	"github.com/MakiDevelop/api-workbench/internal/request"
 	"github.com/MakiDevelop/api-workbench/internal/runner"
@@ -167,6 +169,7 @@ func RunSingle(requestPath string, options RunOptions) (RequestRun, error) {
 	if runErr != nil {
 		response.ExitCode = classifyRunError(runErr)
 		response.Error = runErr.Error()
+		recordHistory(ctx.root, ctx.envName, spec, result, response)
 		return response, nil
 	}
 
@@ -180,7 +183,24 @@ func RunSingle(requestPath string, options RunOptions) (RequestRun, error) {
 		response.SnapshotPath = discover.DisplayRelative(ctx.root, snapshotPath)
 	}
 
+	recordHistory(ctx.root, ctx.envName, spec, result, response)
 	return response, nil
+}
+
+func recordHistory(root, envName string, spec request.Spec, result runner.Result, run RequestRun) {
+	// Best-effort: don't fail the run if history write fails.
+	_ = history.Append(root, history.Entry{
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		RequestPath: run.RequestPath,
+		RequestName: spec.Name,
+		Env:         envName,
+		Method:      result.Method,
+		URL:         result.URL,
+		StatusCode:  result.StatusCode,
+		DurationMs:  result.DurationMS,
+		ExitCode:    run.ExitCode,
+		Error:       run.Error,
+	})
 }
 
 func RunAll(collectionPath string, options RunOptions) (CollectionRun, error) {
@@ -257,6 +277,8 @@ func RunAll(collectionPath string, options RunOptions) (CollectionRun, error) {
 				}
 				run.SnapshotPath = discover.DisplayRelative(ctx.root, snapshotPath)
 			}
+
+			recordHistory(ctx.root, ctx.envName, spec, result, run)
 		}
 
 		response.Runs = append(response.Runs, run)
@@ -447,6 +469,53 @@ func ImportCurl(root, curlCmd, collection string) (string, request.Spec, error) 
 	return saved, spec, nil
 }
 
+// ImportOpenAPI parses an OpenAPI 3 JSON document and writes each operation
+// as a request spec in the workspace. Returns the list of saved file paths.
+func ImportOpenAPI(root string, data []byte, collection string) ([]string, error) {
+	wsRoot, err := findWorkspaceRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(wsRoot); resolveErr == nil {
+		wsRoot = resolved
+	}
+
+	specs, err := openapiimport.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("openapi parse: %w", err)
+	}
+
+	if collection == "" {
+		collection = "requests"
+	}
+
+	var savedPaths []string
+	for _, spec := range specs {
+		baseName := sanitizeFilename(spec.Name)
+		if baseName == "" {
+			baseName = "imported"
+		}
+		fileName := baseName + ".json"
+		filePath := filepath.Join(collection, fileName)
+
+		// Avoid collisions.
+		absPath := filepath.Join(wsRoot, filePath)
+		for counter := 2; fileExists(absPath); counter++ {
+			fileName = fmt.Sprintf("%s-%d.json", baseName, counter)
+			filePath = filepath.Join(collection, fileName)
+			absPath = filepath.Join(wsRoot, filePath)
+		}
+
+		saved, err := SaveRequest(wsRoot, filePath, spec)
+		if err != nil {
+			return savedPaths, fmt.Errorf("save %s: %w", spec.Name, err)
+		}
+		savedPaths = append(savedPaths, saved)
+	}
+
+	return savedPaths, nil
+}
+
 // SnapshotEntry represents a snapshot file in the workspace.
 type SnapshotEntry struct {
 	Name       string `json:"name"`
@@ -513,6 +582,18 @@ func ListSnapshots(root string) ([]SnapshotEntry, error) {
 	})
 
 	return snapshots, nil
+}
+
+// ListHistory returns recent history entries across all daily files.
+func ListHistory(root string, limit int) ([]history.Entry, error) {
+	wsRoot, err := findWorkspaceRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(wsRoot); resolveErr == nil {
+		wsRoot = resolved
+	}
+	return history.List(wsRoot, limit)
 }
 
 // DiffSnapshots compares two snapshot files and returns structured differences.

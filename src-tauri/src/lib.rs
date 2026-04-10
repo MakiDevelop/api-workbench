@@ -311,6 +311,45 @@ async fn diff_snapshots_gui(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn list_history_gui(app: AppHandle, root: String, limit: u64) -> Result<Value, String> {
+    ensure_sidecar(&app)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<SidecarState>();
+        state.send_rpc(
+            "list_history",
+            serde_json::json!({ "root": root, "limit": limit }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn import_openapi_gui(
+    app: AppHandle,
+    root: String,
+    content: String,
+    collection: String,
+) -> Result<Value, String> {
+    ensure_sidecar(&app)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<SidecarState>();
+        state.send_rpc(
+            "import_openapi",
+            serde_json::json!({
+                "root": root,
+                "content": content,
+                "collection": collection,
+            }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -324,7 +363,9 @@ pub fn run() {
             import_curl_gui,
             save_request_gui,
             list_snapshots_gui,
-            diff_snapshots_gui
+            diff_snapshots_gui,
+            list_history_gui,
+            import_openapi_gui
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
