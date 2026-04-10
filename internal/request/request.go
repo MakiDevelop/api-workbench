@@ -14,7 +14,18 @@ type Spec struct {
 	Query      map[string]string `json:"query"`
 	Assertions []Assertion       `json:"assertions"`
 	Body       *Body             `json:"body"`
+	Auth       *Auth             `json:"auth,omitempty"`    // optional auth preset — resolved to headers at runtime
 	Extract    map[string]string `json:"extract,omitempty"` // name → JSON pointer, extracted values become variables for subsequent requests
+}
+
+type Auth struct {
+	Type   string `json:"type"`              // "bearer", "basic", "api-key"
+	Token  string `json:"token,omitempty"`   // bearer token (supports $VAR)
+	User   string `json:"user,omitempty"`    // basic auth username
+	Pass   string `json:"pass,omitempty"`    // basic auth password
+	Key    string `json:"key,omitempty"`     // api-key header name (default: X-API-Key)
+	Value  string `json:"value,omitempty"`   // api-key value
+	In     string `json:"in,omitempty"`      // api-key location: "header" (default) or "query"
 }
 
 type Body struct {

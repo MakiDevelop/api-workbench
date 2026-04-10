@@ -227,6 +227,90 @@ async fn run_collection_gui(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn import_curl_gui(
+    app: AppHandle,
+    root: String,
+    curl_cmd: String,
+    collection: String,
+) -> Result<Value, String> {
+    ensure_sidecar(&app)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<SidecarState>();
+        state.send_rpc(
+            "import_curl",
+            serde_json::json!({
+                "root": root,
+                "curlCmd": curl_cmd,
+                "collection": collection,
+            }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn save_request_gui(
+    app: AppHandle,
+    root: String,
+    file_path: String,
+    spec: Value,
+) -> Result<Value, String> {
+    ensure_sidecar(&app)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<SidecarState>();
+        state.send_rpc(
+            "save_request",
+            serde_json::json!({
+                "root": root,
+                "filePath": file_path,
+                "spec": spec,
+            }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn list_snapshots_gui(app: AppHandle, root: String) -> Result<Value, String> {
+    ensure_sidecar(&app)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<SidecarState>();
+        state.send_rpc("list_snapshots", serde_json::json!({ "root": root }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn diff_snapshots_gui(
+    app: AppHandle,
+    root: String,
+    left_path: String,
+    right_path: String,
+) -> Result<Value, String> {
+    ensure_sidecar(&app)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<SidecarState>();
+        state.send_rpc(
+            "diff_snapshots",
+            serde_json::json!({
+                "root": root,
+                "leftPath": left_path,
+                "rightPath": right_path,
+            }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -236,7 +320,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             run_request_gui,
-            run_collection_gui
+            run_collection_gui,
+            import_curl_gui,
+            save_request_gui,
+            list_snapshots_gui,
+            diff_snapshots_gui
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

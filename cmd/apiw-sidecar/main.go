@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MakiDevelop/api-workbench/internal/app"
+	"github.com/MakiDevelop/api-workbench/internal/request"
 	"github.com/MakiDevelop/api-workbench/internal/workspace"
 )
 
@@ -79,6 +80,28 @@ type runCollectionParams struct {
 	EnvName        string `json:"envName"`
 	TimeoutMs      int    `json:"timeoutMs"`
 	Snapshot       bool   `json:"snapshot"`
+}
+
+type importCurlParams struct {
+	Root       string `json:"root"`
+	CurlCmd    string `json:"curlCmd"`
+	Collection string `json:"collection"`
+}
+
+type saveRequestParams struct {
+	Root     string       `json:"root"`
+	FilePath string       `json:"filePath"`
+	Spec     request.Spec `json:"spec"`
+}
+
+type listSnapshotsParams struct {
+	Root string `json:"root"`
+}
+
+type diffSnapshotsParams struct {
+	Root      string `json:"root"`
+	LeftPath  string `json:"leftPath"`
+	RightPath string `json:"rightPath"`
 }
 
 // --- Serve mode: persistent JSON-RPC on stdin/stdout ---
@@ -192,6 +215,65 @@ func handleRPC(req rpcRequest) rpcResponse {
 			Timeout: time.Duration(timeoutMs) * time.Millisecond,
 			Snapshot: p.Snapshot,
 		})
+		if err != nil {
+			base.Error = err.Error()
+			return base
+		}
+		base.Result = result
+		return base
+
+	case "import_curl":
+		var p importCurlParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			base.Error = "invalid params: " + err.Error()
+			return base
+		}
+		savedPath, spec, err := workspace.ImportCurl(p.Root, p.CurlCmd, p.Collection)
+		if err != nil {
+			base.Error = err.Error()
+			return base
+		}
+		base.Result = map[string]any{
+			"savedPath": savedPath,
+			"spec": spec,
+		}
+		return base
+
+	case "save_request":
+		var p saveRequestParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			base.Error = "invalid params: " + err.Error()
+			return base
+		}
+		savedPath, err := workspace.SaveRequest(p.Root, p.FilePath, p.Spec)
+		if err != nil {
+			base.Error = err.Error()
+			return base
+		}
+		base.Result = map[string]string{"savedPath": savedPath}
+		return base
+
+	case "list_snapshots":
+		var p listSnapshotsParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			base.Error = "invalid params: " + err.Error()
+			return base
+		}
+		snapshots, err := workspace.ListSnapshots(p.Root)
+		if err != nil {
+			base.Error = err.Error()
+			return base
+		}
+		base.Result = snapshots
+		return base
+
+	case "diff_snapshots":
+		var p diffSnapshotsParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			base.Error = "invalid params: " + err.Error()
+			return base
+		}
+		result, err := workspace.DiffSnapshots(p.Root, p.LeftPath, p.RightPath)
 		if err != nil {
 			base.Error = err.Error()
 			return base

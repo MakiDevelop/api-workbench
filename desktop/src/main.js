@@ -5,8 +5,10 @@ import { t, getLang, setLang, LANGUAGES } from "./i18n.js";
 import { getTheme, setTheme, applyTheme, THEMES } from "./themes.js";
 
 const app = document.querySelector("#app");
-const REQUEST_TABS = ["params", "headers", "body", "tests"];
-const RESPONSE_TABS = ["body", "headers", "tests", "collection"];
+const REQUEST_TABS = ["params", "headers", "auth", "body", "tests"];
+const RESPONSE_TABS = ["body", "headers", "tests", "collection", "snapshots"];
+
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 const state = {
   workspaceRoot: "",
@@ -23,6 +25,14 @@ const state = {
   requestFilter: "",
   activeRequestTab: "params",
   activeResponseTab: "body",
+  editing: false,
+  editDraft: null,
+  showImportModal: false,
+  importCurlText: "",
+  snapshots: [],
+  diffResult: null,
+  diffLeft: "",
+  diffRight: "",
 };
 
 function allRequestEntries() {
@@ -92,6 +102,7 @@ function render() {
         <div class="topbar__actions">
           <select class="settings-select" data-role="lang-select">${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === getLang() ? "selected" : ""}>${l.label}</option>`).join("")}</select>
           <select class="settings-select" data-role="theme-select">${THEMES.map((th) => `<option value="${th.id}" ${th.id === getTheme() ? "selected" : ""}>${th.label}</option>`).join("")}</select>
+          <button class="chrome-button" data-action="import-curl" ${workspace ? "" : "disabled"}>${t("importCurl")}</button>
           <button class="chrome-button" data-action="pick-workspace">${t("openWorkspace")}</button>
           <button class="chrome-button chrome-button--accent" data-action="reload-workspace" ${workspace ? "" : "disabled"}>${t("reload")}</button>
         </div>
@@ -201,26 +212,35 @@ function render() {
           <section class="editor-panel">
             <div class="panel-topline panel-topline--editor">
               <div>
-                <span class="panel-caption">${t("request")}</span>
-                <h2>${escapeHtml(selected?.name || t("chooseRequest"))}</h2>
+                <span class="panel-caption">${t("request")} ${state.editing ? `<span class="inline-chip inline-chip--edit">${t("editing")}</span>` : ""}</span>
+                <h2>${escapeHtml(state.editing ? (state.editDraft?.name || t("newRequest")) : (selected?.name || t("chooseRequest")))}</h2>
               </div>
               <div class="request-actions">
-                <button class="ghost-button" data-action="run-all" ${workspace ? "" : "disabled"}>${t("runner")}</button>
-                <button class="send-button" data-action="run-selected" ${canRunSelected ? "" : "disabled"}>${t("send")}</button>
+                ${state.editing
+                  ? `<button class="ghost-button" data-action="cancel-edit">${t("cancel")}</button>
+                     <button class="send-button" data-action="save-request">${t("save")}</button>`
+                  : `<button class="ghost-button" data-action="edit-request" ${canRunSelected ? "" : "disabled"}>${"Edit"}</button>
+                     <button class="ghost-button" data-action="run-all" ${workspace ? "" : "disabled"}>${t("runner")}</button>
+                     <button class="send-button" data-action="run-selected" ${canRunSelected ? "" : "disabled"}>${t("send")}</button>`
+                }
               </div>
             </div>
 
-            <div class="request-builder ${selected?.loadError ? "request-builder--invalid" : ""}">
+            <div class="request-builder ${selected?.loadError && !state.editing ? "request-builder--invalid" : ""}">
               <div class="request-builder__bar">
-                <span class="method-badge method-badge--${methodClass(selected?.method)}">${escapeHtml(selected?.method || "GET")}</span>
-                <div class="url-field">${escapeHtml(selected?.url || "Select a request from the collection explorer.")}</div>
+                ${state.editing
+                  ? `<select class="method-select" data-role="edit-method">${METHODS.map(m => `<option value="${m}" ${m === state.editDraft?.method ? "selected" : ""}>${m}</option>`).join("")}</select>
+                     <input type="text" class="url-input" data-role="edit-url" value="${escapeAttr(state.editDraft?.url || "")}" placeholder="https://api.example.com/endpoint" />`
+                  : `<span class="method-badge method-badge--${methodClass(selected?.method)}">${escapeHtml(selected?.method || "GET")}</span>
+                     <div class="url-field">${escapeHtml(selected?.url || "Select a request from the collection explorer.")}</div>`
+                }
                 <span class="inline-chip">${escapeHtml(state.selectedEnv || "local")}</span>
               </div>
               <div class="tab-row">
                 ${renderTabs(REQUEST_TABS, activeRequestTab, "select-request-tab")}
               </div>
               <div class="tab-panel">
-                ${renderRequestTabContent(selected, activeRequestTab)}
+                ${state.editing ? renderEditableTabContent(state.editDraft, activeRequestTab) : renderRequestTabContent(selected, activeRequestTab)}
               </div>
             </div>
           </section>
@@ -247,6 +267,8 @@ function render() {
           </section>
         </section>
       </main>
+
+      ${state.showImportModal ? renderImportModal() : ""}
 
       <footer class="statusbar ${state.error ? "statusbar--error" : ""}">
         <span class="statusbar__label">${state.error ? t("error") : t("status")}</span>
@@ -343,6 +365,8 @@ function renderRequestTabContent(entry, tab) {
         t("value"),
         t("noHeaders"),
       );
+    case "auth":
+      return renderAuthPanel(entry.auth, false);
     case "body":
       return renderBodyPanel(entry.body, t("noBody"));
     case "tests":
@@ -355,6 +379,9 @@ function renderRequestTabContent(entry, tab) {
 function renderResponseTabContent(run, requestEntry, tab) {
   if (tab === "collection") {
     return renderCollectionRuns();
+  }
+  if (tab === "snapshots") {
+    return renderSnapshotsTab();
   }
 
   if (!run) {
@@ -421,6 +448,216 @@ function renderCollectionRuns() {
     <div class="collection-runs">
       ${runs}
       ${state.lastRun.error ? `<div class="callout callout--error"><p>${escapeHtml(state.lastRun.error)}</p></div>` : ""}
+    </div>
+  `;
+}
+
+function renderSnapshotsTab() {
+  if (!state.workspace) {
+    return `<div class="empty-state">${t("loadFirst")}</div>`;
+  }
+
+  const snapList = state.snapshots.length > 0
+    ? state.snapshots.map((snap) => `
+        <div class="snapshot-row ${snap.isLatest ? "snapshot-row--latest" : ""}">
+          <div class="snapshot-row__info">
+            <strong>${escapeHtml(snap.name)}</strong>
+            <span class="snapshot-row__time">${escapeHtml(snap.capturedAt || "unknown")}</span>
+          </div>
+          <div class="snapshot-row__actions">
+            <label><input type="radio" name="diff-left" value="${escapeAttr(snap.path)}" ${state.diffLeft === snap.path ? "checked" : ""} data-role="diff-left-radio" /> A</label>
+            <label><input type="radio" name="diff-right" value="${escapeAttr(snap.path)}" ${state.diffRight === snap.path ? "checked" : ""} data-role="diff-right-radio" /> B</label>
+          </div>
+        </div>
+      `).join("")
+    : `<div class="empty-state">${t("noSnapshots")}</div>`;
+
+  const diffSection = state.diffResult
+    ? renderDiffResult(state.diffResult)
+    : "";
+
+  return `
+    <div class="snapshots-tab">
+      <div class="snapshots-toolbar">
+        <button class="ghost-button" data-action="load-snapshots">${t("refreshSnapshots")}</button>
+        <button class="send-button" data-action="run-diff" ${state.diffLeft && state.diffRight && state.diffLeft !== state.diffRight ? "" : "disabled"}>${t("compareDiff")}</button>
+      </div>
+      <div class="snapshot-list">${snapList}</div>
+      ${diffSection}
+    </div>
+  `;
+}
+
+function renderDiffResult(diff) {
+  if (diff.same) {
+    return `<div class="callout callout--success"><strong>${t("noDifferences")}</strong></div>`;
+  }
+
+  const rows = diff.changes.map((c) => {
+    const typeClass = c.type === "added" ? "diff-added" : c.type === "removed" ? "diff-removed" : "diff-changed";
+    return `
+      <div class="diff-row ${typeClass}">
+        <div class="diff-row__field">
+          <span class="inline-chip inline-chip--${c.type}">${escapeHtml(c.type)}</span>
+          <strong>${escapeHtml(c.field)}</strong>
+        </div>
+        ${c.left ? `<div class="diff-row__value diff-row__value--left"><span class="diff-label">A</span><pre>${escapeHtml(c.left)}</pre></div>` : ""}
+        ${c.right ? `<div class="diff-row__value diff-row__value--right"><span class="diff-label">B</span><pre>${escapeHtml(c.right)}</pre></div>` : ""}
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="diff-result">
+      <div class="diff-header">
+        <span>A: ${escapeHtml(diff.leftTime)}</span>
+        <span>B: ${escapeHtml(diff.rightTime)}</span>
+        <span>${diff.changes.length} change(s)</span>
+      </div>
+      ${rows}
+    </div>
+  `;
+}
+
+function renderAuthPanel(auth, editable) {
+  const authType = auth?.type || "none";
+
+  if (!editable) {
+    if (!auth || authType === "none") {
+      return `<div class="empty-state">No authentication configured.</div>`;
+    }
+    return `
+      <div class="auth-panel">
+        <div class="auth-info">
+          <span class="inline-chip">${escapeHtml(authType)}</span>
+          ${authType === "bearer" ? `<span>Token: <code>${escapeHtml(auth.token || "")}</code></span>` : ""}
+          ${authType === "basic" ? `<span>User: <code>${escapeHtml(auth.user || "")}</code></span>` : ""}
+          ${authType === "api-key" ? `<span>Key: <code>${escapeHtml(auth.key || "X-API-Key")}</code> in ${escapeHtml(auth.in || "header")}</span>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="auth-panel auth-panel--editable">
+      <div class="auth-type-row">
+        <label>Type</label>
+        <select class="settings-select" data-role="edit-auth-type">
+          <option value="none" ${authType === "none" ? "selected" : ""}>None</option>
+          <option value="bearer" ${authType === "bearer" ? "selected" : ""}>Bearer Token</option>
+          <option value="basic" ${authType === "basic" ? "selected" : ""}>Basic Auth</option>
+          <option value="api-key" ${authType === "api-key" ? "selected" : ""}>API Key</option>
+        </select>
+      </div>
+      ${authType === "bearer" ? `
+        <label class="field field--stacked">
+          <span>Token</span>
+          <input type="text" class="kv-input" data-role="edit-auth-token" value="${escapeAttr(auth?.token || "")}" placeholder="$API_TOKEN or paste token" />
+        </label>
+      ` : ""}
+      ${authType === "basic" ? `
+        <label class="field field--stacked">
+          <span>Username</span>
+          <input type="text" class="kv-input" data-role="edit-auth-user" value="${escapeAttr(auth?.user || "")}" placeholder="username" />
+        </label>
+        <label class="field field--stacked">
+          <span>Password</span>
+          <input type="password" class="kv-input" data-role="edit-auth-pass" value="${escapeAttr(auth?.pass || "")}" placeholder="password" />
+        </label>
+      ` : ""}
+      ${authType === "api-key" ? `
+        <label class="field field--stacked">
+          <span>Header Name</span>
+          <input type="text" class="kv-input" data-role="edit-auth-key" value="${escapeAttr(auth?.key || "X-API-Key")}" placeholder="X-API-Key" />
+        </label>
+        <label class="field field--stacked">
+          <span>Value</span>
+          <input type="text" class="kv-input" data-role="edit-auth-value" value="${escapeAttr(auth?.value || "")}" placeholder="$API_KEY or paste key" />
+        </label>
+        <div class="auth-type-row">
+          <label>Send in</label>
+          <select class="settings-select" data-role="edit-auth-in">
+            <option value="header" ${(auth?.in || "header") === "header" ? "selected" : ""}>Header</option>
+            <option value="query" ${auth?.in === "query" ? "selected" : ""}>Query Parameter</option>
+          </select>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderImportModal() {
+  return `
+    <div class="modal-overlay" data-action="close-import">
+      <div class="modal-box" onclick="event.stopPropagation()">
+        <h3>${t("importCurl")}</h3>
+        <textarea class="import-textarea" data-role="import-curl-input" rows="8" placeholder="${escapeAttr(t("importCurlPlaceholder"))}">${escapeHtml(state.importCurlText)}</textarea>
+        <div class="modal-actions">
+          <button class="ghost-button" data-action="close-import">${t("cancel")}</button>
+          <button class="send-button" data-action="do-import-curl">${t("importBtn")}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditableTabContent(draft, tab) {
+  if (!draft) return `<div class="empty-state">${t("chooseRequestHint")}</div>`;
+
+  switch (tab) {
+    case "params":
+      return renderEditableKVTable(draft.query || {}, "query", t("queryParam"), t("value"));
+    case "headers":
+      return renderEditableKVTable(draft.headers || {}, "headers", t("header"), t("value"));
+    case "auth":
+      return renderAuthPanel(draft.auth, true);
+    case "body":
+      return renderEditableBody(draft);
+    case "tests":
+      return renderAssertionPanel(draft.assertions);
+    default:
+      return `<div class="empty-state">${t("unknownTab")}</div>`;
+  }
+}
+
+function renderEditableKVTable(record, fieldName, keyLabel, valueLabel) {
+  const entries = Object.entries(record);
+
+  const rows = entries.map(([key, value], idx) => `
+    <div class="kv-table__row kv-table__row--editable">
+      <input type="text" class="kv-input" data-role="edit-kv-key" data-field="${fieldName}" data-index="${idx}" value="${escapeAttr(key)}" placeholder="${escapeAttr(keyLabel)}" />
+      <input type="text" class="kv-input" data-role="edit-kv-value" data-field="${fieldName}" data-index="${idx}" value="${escapeAttr(value)}" placeholder="${escapeAttr(valueLabel)}" />
+      <button class="ghost-button ghost-button--small" data-action="remove-kv-row" data-field="${fieldName}" data-index="${idx}">&times;</button>
+    </div>
+  `).join("");
+
+  return `
+    <div class="kv-table kv-table--editable">
+      <div class="kv-table__header">
+        <span>${escapeHtml(keyLabel)}</span>
+        <span>${escapeHtml(valueLabel)}</span>
+        <span></span>
+      </div>
+      ${rows}
+      <button class="ghost-button ghost-button--add" data-action="add-kv-row" data-field="${fieldName}">+ ${t("addRow")}</button>
+    </div>
+  `;
+}
+
+function renderEditableBody(draft) {
+  const bodyType = draft.body?.type || "json";
+  const bodyContent = draft.body?.content || "";
+
+  return `
+    <div class="body-panel body-panel--editable">
+      <div class="body-panel__controls">
+        <select class="settings-select" data-role="edit-body-type">
+          <option value="json" ${bodyType === "json" ? "selected" : ""}>JSON</option>
+          <option value="text" ${bodyType === "text" ? "selected" : ""}>Text</option>
+          <option value="form" ${bodyType === "form" ? "selected" : ""}>Form</option>
+        </select>
+      </div>
+      <textarea class="body-textarea" data-role="edit-body-content" rows="10" placeholder="${escapeAttr(t("noBody"))}">${escapeHtml(bodyContent)}</textarea>
     </div>
   `;
 }
@@ -537,10 +774,11 @@ function responseTitle(run, requestEntry) {
 }
 
 function responseTabs() {
-  if (state.lastRun?.mode === "collection") {
-    return RESPONSE_TABS;
-  }
-  return RESPONSE_TABS.filter((tab) => tab !== "collection");
+  const tabs = RESPONSE_TABS.filter((tab) => {
+    if (tab === "collection" && state.lastRun?.mode !== "collection") return false;
+    return true;
+  });
+  return tabs;
 }
 
 function testHeadline(run, configuredCount, failureCount) {
@@ -628,6 +866,137 @@ function bindEvents() {
       state.activeResponseTab = button.dataset.tab;
       render();
     });
+  });
+
+  app.querySelectorAll("[data-action='load-snapshots']").forEach((button) => {
+    button.addEventListener("click", loadSnapshots);
+  });
+  app.querySelectorAll("[data-action='run-diff']").forEach((button) => {
+    button.addEventListener("click", runDiff);
+  });
+  app.querySelectorAll("[data-role='diff-left-radio']").forEach((radio) => {
+    radio.addEventListener("change", () => {
+      state.diffLeft = radio.value;
+      state.diffResult = null;
+      render();
+    });
+  });
+  app.querySelectorAll("[data-role='diff-right-radio']").forEach((radio) => {
+    radio.addEventListener("change", () => {
+      state.diffRight = radio.value;
+      state.diffResult = null;
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-action='import-curl']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.showImportModal = true;
+      state.importCurlText = "";
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='close-import']").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.showImportModal = false;
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='do-import-curl']").forEach((button) => {
+    button.addEventListener("click", doImportCurl);
+  });
+  app.querySelectorAll("[data-action='edit-request']").forEach((button) => {
+    button.addEventListener("click", startEditing);
+  });
+  app.querySelectorAll("[data-action='cancel-edit']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.editing = false;
+      state.editDraft = null;
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='save-request']").forEach((button) => {
+    button.addEventListener("click", saveRequest);
+  });
+  app.querySelectorAll("[data-action='add-kv-row']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = button.dataset.field;
+      if (!state.editDraft[field]) state.editDraft[field] = {};
+      state.editDraft[field][""] = "";
+      render();
+    });
+  });
+  app.querySelectorAll("[data-action='remove-kv-row']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = button.dataset.field;
+      const idx = parseInt(button.dataset.index, 10);
+      const entries = Object.entries(state.editDraft[field] || {});
+      entries.splice(idx, 1);
+      state.editDraft[field] = Object.fromEntries(entries);
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-role='edit-kv-key']").forEach((input) => {
+    input.addEventListener("change", () => {
+      syncKVEdits();
+    });
+  });
+  app.querySelectorAll("[data-role='edit-kv-value']").forEach((input) => {
+    input.addEventListener("change", () => {
+      syncKVEdits();
+    });
+  });
+
+  app.querySelector("[data-role='edit-method']")?.addEventListener("change", (event) => {
+    if (state.editDraft) state.editDraft.method = event.target.value;
+  });
+  app.querySelector("[data-role='edit-url']")?.addEventListener("input", (event) => {
+    if (state.editDraft) state.editDraft.url = event.target.value;
+  });
+  app.querySelector("[data-role='edit-body-type']")?.addEventListener("change", (event) => {
+    if (state.editDraft) {
+      if (!state.editDraft.body) state.editDraft.body = { type: "json", content: "" };
+      state.editDraft.body.type = event.target.value;
+    }
+  });
+  app.querySelector("[data-role='edit-body-content']")?.addEventListener("input", (event) => {
+    if (state.editDraft) {
+      if (!state.editDraft.body) state.editDraft.body = { type: "json", content: "" };
+      state.editDraft.body.content = event.target.value;
+    }
+  });
+  app.querySelector("[data-role='edit-auth-type']")?.addEventListener("change", (event) => {
+    if (!state.editDraft) return;
+    const type = event.target.value;
+    if (type === "none") {
+      state.editDraft.auth = null;
+    } else {
+      state.editDraft.auth = { type, ...(state.editDraft.auth || {}) };
+      state.editDraft.auth.type = type;
+    }
+    render();
+  });
+  app.querySelector("[data-role='edit-auth-token']")?.addEventListener("input", (event) => {
+    if (state.editDraft?.auth) state.editDraft.auth.token = event.target.value;
+  });
+  app.querySelector("[data-role='edit-auth-user']")?.addEventListener("input", (event) => {
+    if (state.editDraft?.auth) state.editDraft.auth.user = event.target.value;
+  });
+  app.querySelector("[data-role='edit-auth-pass']")?.addEventListener("input", (event) => {
+    if (state.editDraft?.auth) state.editDraft.auth.pass = event.target.value;
+  });
+  app.querySelector("[data-role='edit-auth-key']")?.addEventListener("input", (event) => {
+    if (state.editDraft?.auth) state.editDraft.auth.key = event.target.value;
+  });
+  app.querySelector("[data-role='edit-auth-value']")?.addEventListener("input", (event) => {
+    if (state.editDraft?.auth) state.editDraft.auth.value = event.target.value;
+  });
+  app.querySelector("[data-role='edit-auth-in']")?.addEventListener("change", (event) => {
+    if (state.editDraft?.auth) state.editDraft.auth.in = event.target.value;
+  });
+  app.querySelector("[data-role='import-curl-input']")?.addEventListener("input", (event) => {
+    state.importCurlText = event.target.value;
   });
 
   app.querySelectorAll("[data-action='pick-workspace']").forEach((button) => {
@@ -834,6 +1203,167 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value);
+}
+
+function startEditing() {
+  const selected = selectedRequestEntry();
+  if (!selected || selected.loadError) return;
+
+  state.editing = true;
+  state.editDraft = {
+    name: selected.name || "",
+    method: selected.method || "GET",
+    url: selected.url || "",
+    headers: { ...(selected.headers || {}) },
+    query: { ...(selected.query || {}) },
+    body: selected.body ? { type: selected.body.type || "json", content: selected.body.content || "" } : null,
+    auth: selected.auth ? { ...selected.auth } : null,
+    assertions: selected.assertions ? [...selected.assertions] : [],
+    path: selected.path,
+  };
+  render();
+}
+
+function syncKVEdits() {
+  if (!state.editDraft) return;
+
+  for (const field of ["query", "headers"]) {
+    const keyInputs = app.querySelectorAll(`[data-role="edit-kv-key"][data-field="${field}"]`);
+    const valInputs = app.querySelectorAll(`[data-role="edit-kv-value"][data-field="${field}"]`);
+    const newObj = {};
+    keyInputs.forEach((keyInput, idx) => {
+      const k = keyInput.value;
+      const v = valInputs[idx]?.value || "";
+      if (k) newObj[k] = v;
+    });
+    state.editDraft[field] = newObj;
+  }
+}
+
+async function saveRequest() {
+  if (!state.editDraft || !state.workspace) return;
+
+  syncKVEdits();
+
+  const draft = state.editDraft;
+
+  // Build the spec to save.
+  const spec = {
+    name: draft.name || "Untitled",
+    method: (draft.method || "GET").toUpperCase(),
+    url: draft.url || "",
+  };
+  if (draft.headers && Object.keys(draft.headers).length > 0) spec.headers = draft.headers;
+  if (draft.query && Object.keys(draft.query).length > 0) spec.query = draft.query;
+  if (draft.assertions && draft.assertions.length > 0) spec.assertions = draft.assertions;
+
+  if (draft.auth && draft.auth.type && draft.auth.type !== "none") {
+    spec.auth = draft.auth;
+  }
+
+  if (draft.body && draft.body.content) {
+    const bodyType = draft.body.type || "json";
+    let content = draft.body.content;
+
+    if (bodyType === "json") {
+      try { content = JSON.parse(content); } catch { /* leave as string */ }
+    } else if (bodyType === "text") {
+      // text content is stored as a JSON string
+    } else if (bodyType === "form") {
+      try { content = JSON.parse(content); } catch { /* leave as string */ }
+    }
+
+    spec.body = { type: bodyType, content };
+  }
+
+  state.loading = true;
+  state.error = "";
+  render();
+
+  try {
+    await invoke("save_request_gui", {
+      root: state.workspace.root,
+      filePath: draft.path,
+      spec,
+    });
+    state.editing = false;
+    state.editDraft = null;
+    state.status = t("saveSuccess");
+    await loadWorkspace(state.workspace.root);
+  } catch (error) {
+    state.error = String(error);
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+async function loadSnapshots() {
+  if (!state.workspace) return;
+
+  try {
+    const snapshots = await invoke("list_snapshots_gui", { root: state.workspace.root });
+    state.snapshots = snapshots || [];
+    state.diffLeft = "";
+    state.diffRight = "";
+    state.diffResult = null;
+    state.status = `${state.snapshots.length} snapshot(s) found`;
+  } catch (error) {
+    state.error = String(error);
+  }
+  render();
+}
+
+async function runDiff() {
+  if (!state.workspace || !state.diffLeft || !state.diffRight) return;
+
+  state.loading = true;
+  state.error = "";
+  render();
+
+  try {
+    const result = await invoke("diff_snapshots_gui", {
+      root: state.workspace.root,
+      leftPath: state.diffLeft,
+      rightPath: state.diffRight,
+    });
+    state.diffResult = result;
+    state.status = result.same ? t("noDifferences") : `${result.changes.length} difference(s) found`;
+  } catch (error) {
+    state.error = String(error);
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+async function doImportCurl() {
+  if (!state.importCurlText.trim() || !state.workspace) return;
+
+  state.loading = true;
+  state.error = "";
+  state.showImportModal = false;
+  render();
+
+  try {
+    const result = await invoke("import_curl_gui", {
+      root: state.workspace.root,
+      curlCmd: state.importCurlText,
+      collection: state.workspace.collectionPath || "requests",
+    });
+    state.status = `${t("importSuccess")} → ${result.savedPath}`;
+    state.importCurlText = "";
+    await loadWorkspace(state.workspace.root);
+    // Select the newly imported request.
+    if (result.savedPath) {
+      state.selectedRequest = result.savedPath;
+    }
+  } catch (error) {
+    state.error = String(error);
+  } finally {
+    state.loading = false;
+    render();
+  }
 }
 
 async function bootstrap() {

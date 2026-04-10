@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/MakiDevelop/api-workbench/internal/curlimport"
+	"github.com/MakiDevelop/api-workbench/internal/diff"
 	"github.com/MakiDevelop/api-workbench/internal/discover"
 	"github.com/MakiDevelop/api-workbench/internal/envfile"
 	"github.com/MakiDevelop/api-workbench/internal/project"
@@ -31,6 +35,7 @@ type RequestEntry struct {
 	Headers    map[string]string   `json:"headers,omitempty"`
 	Query      map[string]string   `json:"query,omitempty"`
 	Body       *RequestBodyPreview `json:"body,omitempty"`
+	Auth       *request.Auth       `json:"auth,omitempty"`
 	Assertions []request.Assertion `json:"assertions,omitempty"`
 	LoadError  string              `json:"loadError,omitempty"`
 }
@@ -117,6 +122,7 @@ func LoadInfo(startRoot, collection string) (Info, error) {
 			entry.URL = spec.URL
 			entry.Headers = spec.Headers
 			entry.Query = spec.Query
+			entry.Auth = spec.Auth
 			entry.Assertions = spec.Assertions
 			entry.Body = previewBody(spec.Body)
 		}
@@ -357,6 +363,209 @@ func previewBody(body *request.Body) *RequestBodyPreview {
 	}
 
 	return preview
+}
+
+// SaveRequest writes a request.Spec as a formatted JSON file under the workspace.
+// The filePath must be relative to the workspace root (e.g. "requests/my-api.json").
+func SaveRequest(root, filePath string, spec request.Spec) (string, error) {
+	wsRoot, err := findWorkspaceRoot(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(wsRoot); resolveErr == nil {
+		wsRoot = resolved
+	}
+
+	absPath, err := resolvePath(wsRoot, filePath)
+	if err != nil {
+		return "", err
+	}
+
+	if err := spec.Validate(); err != nil {
+		return "", fmt.Errorf("invalid spec: %w", err)
+	}
+
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(absPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+
+	if err := os.WriteFile(absPath, data, 0o644); err != nil {
+		return "", err
+	}
+
+	return discover.DisplayRelative(wsRoot, absPath), nil
+}
+
+// ImportCurl parses a cURL command and saves the resulting request spec.
+// Returns the saved file path (relative to workspace root) and the parsed spec.
+func ImportCurl(root, curlCmd, collection string) (string, request.Spec, error) {
+	wsRoot, err := findWorkspaceRoot(root)
+	if err != nil {
+		return "", request.Spec{}, err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(wsRoot); resolveErr == nil {
+		wsRoot = resolved
+	}
+
+	spec, err := curlimport.Parse(curlCmd)
+	if err != nil {
+		return "", request.Spec{}, fmt.Errorf("curl parse: %w", err)
+	}
+
+	if collection == "" {
+		collection = "requests"
+	}
+
+	// Generate a unique filename.
+	baseName := sanitizeFilename(spec.Name)
+	if baseName == "" {
+		baseName = "imported"
+	}
+	fileName := baseName + ".json"
+	filePath := filepath.Join(collection, fileName)
+
+	// Check for conflicts and add a numeric suffix if needed.
+	absPath := filepath.Join(wsRoot, filePath)
+	for counter := 2; fileExists(absPath); counter++ {
+		fileName = fmt.Sprintf("%s-%d.json", baseName, counter)
+		filePath = filepath.Join(collection, fileName)
+		absPath = filepath.Join(wsRoot, filePath)
+	}
+
+	saved, err := SaveRequest(wsRoot, filePath, spec)
+	if err != nil {
+		return "", request.Spec{}, err
+	}
+
+	return saved, spec, nil
+}
+
+// SnapshotEntry represents a snapshot file in the workspace.
+type SnapshotEntry struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`       // relative to workspace root
+	CapturedAt string `json:"capturedAt"` // from snapshot JSON
+	IsLatest   bool   `json:"isLatest"`   // true for the non-timestamped current file
+}
+
+// ListSnapshots returns all snapshot files in the workspace, sorted newest first.
+func ListSnapshots(root string) ([]SnapshotEntry, error) {
+	wsRoot, err := findWorkspaceRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(wsRoot); resolveErr == nil {
+		wsRoot = resolved
+	}
+
+	dir := filepath.Join(wsRoot, ".apiw", "snapshots")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var snapshots []SnapshotEntry
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+
+		absPath := filepath.Join(dir, e.Name())
+		relPath := discover.DisplayRelative(wsRoot, absPath)
+
+		// Read capturedAt from the file.
+		capturedAt := ""
+		if data, readErr := os.ReadFile(absPath); readErr == nil {
+			var snap struct {
+				CapturedAt string `json:"capturedAt"`
+			}
+			if json.Unmarshal(data, &snap) == nil {
+				capturedAt = snap.CapturedAt
+			}
+		}
+
+		// Determine if this is the latest (non-timestamped) snapshot.
+		// Timestamped archives have 3 "--" separators, latest has 1.
+		parts := strings.Split(strings.TrimSuffix(e.Name(), ".json"), "--")
+		isLatest := len(parts) <= 2
+
+		snapshots = append(snapshots, SnapshotEntry{
+			Name:       e.Name(),
+			Path:       relPath,
+			CapturedAt: capturedAt,
+			IsLatest:   isLatest,
+		})
+	}
+
+	// Sort: newest first (by capturedAt descending).
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].CapturedAt > snapshots[j].CapturedAt
+	})
+
+	return snapshots, nil
+}
+
+// DiffSnapshots compares two snapshot files and returns structured differences.
+func DiffSnapshots(root, leftPath, rightPath string) (diff.SnapshotDiff, error) {
+	wsRoot, err := findWorkspaceRoot(root)
+	if err != nil {
+		return diff.SnapshotDiff{}, err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(wsRoot); resolveErr == nil {
+		wsRoot = resolved
+	}
+
+	absLeft, err := resolvePath(wsRoot, leftPath)
+	if err != nil {
+		return diff.SnapshotDiff{}, fmt.Errorf("left path: %w", err)
+	}
+	absRight, err := resolvePath(wsRoot, rightPath)
+	if err != nil {
+		return diff.SnapshotDiff{}, fmt.Errorf("right path: %w", err)
+	}
+
+	leftData, err := os.ReadFile(absLeft)
+	if err != nil {
+		return diff.SnapshotDiff{}, fmt.Errorf("read left: %w", err)
+	}
+	rightData, err := os.ReadFile(absRight)
+	if err != nil {
+		return diff.SnapshotDiff{}, fmt.Errorf("read right: %w", err)
+	}
+
+	return diff.Snapshots(leftData, rightData)
+}
+
+func sanitizeFilename(name string) string {
+	var b strings.Builder
+	for _, ch := range strings.ToLower(name) {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
+			b.WriteRune(ch)
+		} else if ch == ' ' || ch == '/' {
+			b.WriteRune('-')
+		}
+	}
+	result := b.String()
+	result = strings.Trim(result, "-")
+	if len(result) > 80 {
+		result = result[:80]
+	}
+	return result
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 var errPathTraversal = fmt.Errorf("path escapes workspace root")

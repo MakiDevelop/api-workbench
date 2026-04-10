@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -184,6 +185,10 @@ func WriteSnapshot(root, envName string, spec request.Spec, result Result) (stri
 	}
 
 	path := filepath.Join(dir, sanitize(spec.Name)+"--"+sanitize(envName)+".json")
+
+	// Archive the previous snapshot before overwriting.
+	archiveSnapshot(dir, path, spec.Name, envName)
+
 	payload := Snapshot{
 		RequestName: spec.Name,
 		Environment: envName,
@@ -237,6 +242,51 @@ func expandSpec(spec request.Spec, vars map[string]string) (request.Spec, error)
 		}
 		body.Content = json.RawMessage(bodyStr)
 		expanded.Body = &body
+	}
+
+	// Resolve auth preset to headers/query.
+	if spec.Auth != nil {
+		if expanded.Headers == nil {
+			expanded.Headers = make(map[string]string)
+		}
+		auth := spec.Auth
+		switch strings.ToLower(auth.Type) {
+		case "bearer":
+			token, expandErr := expandString(auth.Token, vars)
+			if expandErr != nil {
+				return request.Spec{}, fmt.Errorf("auth token: %w", expandErr)
+			}
+			expanded.Headers["Authorization"] = "Bearer " + token
+		case "basic":
+			user, expandErr := expandString(auth.User, vars)
+			if expandErr != nil {
+				return request.Spec{}, fmt.Errorf("auth user: %w", expandErr)
+			}
+			pass, expandErr := expandString(auth.Pass, vars)
+			if expandErr != nil {
+				return request.Spec{}, fmt.Errorf("auth pass: %w", expandErr)
+			}
+			encoded := basicAuthEncode(user + ":" + pass)
+			expanded.Headers["Authorization"] = "Basic " + encoded
+		case "api-key":
+			key := auth.Key
+			if key == "" {
+				key = "X-API-Key"
+			}
+			val, expandErr := expandString(auth.Value, vars)
+			if expandErr != nil {
+				return request.Spec{}, fmt.Errorf("auth value: %w", expandErr)
+			}
+			if strings.ToLower(auth.In) == "query" {
+				if expanded.Query == nil {
+					expanded.Query = make(map[string]string)
+				}
+				expanded.Query[key] = val
+			} else {
+				expanded.Headers[key] = val
+			}
+		}
+		expanded.Auth = nil // auth is resolved, don't pass it further
 	}
 
 	return expanded, nil
@@ -340,6 +390,66 @@ func sanitize(value string) string {
 	value = strings.ReplaceAll(value, " ", "-")
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "@", "-", ".", "-")
 	return replacer.Replace(value)
+}
+
+// archiveSnapshot renames the existing snapshot to a timestamped version.
+// Keeps up to 10 historical snapshots per request/env pair.
+func archiveSnapshot(dir, currentPath, name, envName string) {
+	data, err := os.ReadFile(currentPath)
+	if err != nil {
+		return // no previous snapshot to archive
+	}
+
+	// Extract capturedAt from the existing snapshot for the archive name.
+	var existing Snapshot
+	if json.Unmarshal(data, &existing) != nil {
+		return
+	}
+
+	// Parse the timestamp and format as compact string.
+	ts, err := time.Parse(time.RFC3339, existing.CapturedAt)
+	if err != nil {
+		ts = time.Now().UTC()
+	}
+	stamp := ts.Format("20060102-150405")
+
+	archiveName := sanitize(name) + "--" + sanitize(envName) + "--" + stamp + ".json"
+	archivePath := filepath.Join(dir, archiveName)
+
+	// Don't overwrite if archive already exists (same timestamp).
+	if _, err := os.Stat(archivePath); err == nil {
+		return
+	}
+
+	os.Rename(currentPath, archivePath)
+
+	// Prune old archives: keep only the latest 10.
+	pruneArchives(dir, name, envName, 10)
+}
+
+func pruneArchives(dir, name, envName string, keep int) {
+	prefix := sanitize(name) + "--" + sanitize(envName) + "--"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	var archives []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ".json") {
+			archives = append(archives, e.Name())
+		}
+	}
+
+	if len(archives) <= keep {
+		return
+	}
+
+	// Archives are sorted chronologically by name (timestamp in name).
+	sort.Strings(archives)
+	for _, a := range archives[:len(archives)-keep] {
+		os.Remove(filepath.Join(dir, a))
+	}
 }
 
 func evaluateAssertions(assertions []request.Assertion, result Result, parsedBody any, bodyIsJSON bool) []string {
@@ -514,4 +624,36 @@ func resolveJSONArrayLength(body string, pointer string) (int, error) {
 		return 0, fmt.Errorf("body is not valid JSON: %w", err)
 	}
 	return resolveJSONArrayLengthParsed(data, pointer)
+}
+
+const b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+func basicAuthEncode(data string) string {
+	src := []byte(data)
+	var b strings.Builder
+	for i := 0; i < len(src); i += 3 {
+		remaining := len(src) - i
+		var n uint32
+		switch {
+		case remaining >= 3:
+			n = uint32(src[i])<<16 | uint32(src[i+1])<<8 | uint32(src[i+2])
+			b.WriteByte(b64Chars[n>>18&0x3F])
+			b.WriteByte(b64Chars[n>>12&0x3F])
+			b.WriteByte(b64Chars[n>>6&0x3F])
+			b.WriteByte(b64Chars[n&0x3F])
+		case remaining == 2:
+			n = uint32(src[i])<<16 | uint32(src[i+1])<<8
+			b.WriteByte(b64Chars[n>>18&0x3F])
+			b.WriteByte(b64Chars[n>>12&0x3F])
+			b.WriteByte(b64Chars[n>>6&0x3F])
+			b.WriteByte('=')
+		case remaining == 1:
+			n = uint32(src[i]) << 16
+			b.WriteByte(b64Chars[n>>18&0x3F])
+			b.WriteByte(b64Chars[n>>12&0x3F])
+			b.WriteByte('=')
+			b.WriteByte('=')
+		}
+	}
+	return b.String()
 }
